@@ -101,7 +101,7 @@ export default {
 			const userID_Path = userID.split(/[,\r]/)[0];
 
 			if (request.headers.get('Upgrade') !== 'websocket') {
-				switch (url.pathname) {
+				switch (url.pathname.toLowerCase().replace(/\/+$/, '')) {
 					case '/cfrequest':
 						return new Response(JSON.stringify(request.cf, null, 4), {
 							status: 200,
@@ -1104,6 +1104,7 @@ function getConfig(userIDs, hostName) {
 
 	// Prepare output string for each userID
 	const sublink = `https://${hostName}/${userIDArray[0]}/sub`;
+	const subbestip = `https://${hostName}/bestip/${userIDArray[0]}`;
 	// HTML Head with CSS and FontAwesome library
 	const htmlHead = `
   <head>
@@ -1238,8 +1239,8 @@ function getConfig(userIDs, hostName) {
         <a href="${sublink}" class="btn" target="_blank"><i class="fas fa-link"></i>自适应订阅（推荐！）</a>
         <a href="clash://install-config?url=${encodeURIComponent(sublink + "?clash")}" class="btn" target="_blank"><i class="fas fa-bolt"></i> Clash-Meta 订阅</a>
         <a href="${sublink}?clash" class="btn" target="_blank"><i class="fas fa-bolt"></i> Clash Link</a>
-        <a href="${sublink}?vless" class="btn" target="_blank"><i class="fas fa-bolt"></i> VLESS Link</a>
         <a href="${sublink}?singbox" class="btn" target="_blank"><i class="fas fa-star"></i> Singbox Link</a>
+		<a href="${subbestip}" class="btn" target="_blank"><i class="fas fa-star"></i> Best IP Subscription</a>
       </div>
       <div class="subscription-info">
         <h3>选项说明:</h3>
@@ -1247,8 +1248,8 @@ function getConfig(userIDs, hostName) {
           <li><strong>自适应订阅:</strong> 客户端自适应的链接（仅适用于支持 VLESS协议 的客户端）。为许多<b>不同国家/地区</b>提供最佳服务器 IP 的精选列表</li>
           <li><strong>Clash-Meta 订阅:</strong> 打开具有预配置设置的 Clash 客户端。最适合移动设备上的 Clash 用户。</li>
           <li><strong>Clash-Meta Link:</strong> 用于将 Clash 配置转换为 Clash 格式的 Web 链接。对于手动导入或故障排除很有用。</li>
-          <li><strong>VLESS Link:</strong> 用于将 VLESS 的 Web 链接。对于手动导入或故障排除很有用。</li>
           <li><strong>Singbox Link:</strong> 用于将 Singbox 的 Web 链接。对于手动导入或故障排除很有用。</li>
+		  <li><strong>Best IP Subscription:</strong> Provides a curated list of optimal server IPs for many <b>different countries</b>.</li>
         </ul>
         <p>选择最适合您的客户和需求的选项。</p>
       </div>
@@ -1330,7 +1331,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 
 	let subProtocol = "http";
 	let subconverSplit = subconverter.split("://");
-	
+
 	// 连接协议 有时候是本地服务
 	if (subconverSplit.length > 1) {
 		subProtocol = subconverSplit[0];
@@ -1349,7 +1350,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	}
 
 	// 是否是订阅服务请求 https://${host}/convertersubrequest
-	let isSubReq = url.pathname === "/convertersubrequest";
+	let isSubReq = url.pathname.toLowerCase().startsWith("/convertersubrequest");
 
 	if (target && !isSubReq) {
 		if (!subconverter) {
@@ -1377,7 +1378,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 			}
 
 			// 还原假信息为真
-			return new Response((await response.text()).replace(new RegExp(fakeUserID, 'g'), userID).replace(new RegExp(randomDomain, 'g'), host), {
+			return new Response((await response.text()).replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(randomDomain, 'gm'), host), {
 				status: response.status,
 				statusText: response.statusText,
 				headers: response.headers
@@ -1396,12 +1397,22 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	let onlyTls = true;
 	let addresses = [];
 
+	// CF IP列表
+	if (url.searchParams.has("cfproxylist") && !url.searchParams.get("cfproxylist")) {
+		IPs = url.searchParams.get("cfproxylist").trim().split(",").map(list => "api://" + list).join(',');
+	}
 	if (IPs) {
 		addresses = addresses.concat(await getReProxys(IPs));
+	}
+
+	// CVS CF代理表格
+	if (url.searchParams.has("cfproxycvs") && !url.searchParams.get("cfproxycvs")) {
+		CVS = url.searchParams.get("cfproxycvs");
 	}
 	if (CVS) {
 		addresses = addresses.concat(await getReProxysFromCsv(CVS, onlyTls, DLS));
 	}
+
 	// CF优选生成器
 	if (url.searchParams.has("cfproxygener") && !url.searchParams.get("cfproxygener")) {
 		CFProxyGener = url.searchParams.get("cfproxygener");
@@ -1411,14 +1422,15 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	}
 
 	let partTag = "";
-	if (host.includes('.workers.dev') || host.includes('pages.dev')) {
+	if (!isSubReq && (host.includes('.workers.dev') || host.includes('pages.dev'))) {
 		partTag += "--请绑定自定义域!";
 	}
-	// 如何是isSubReq，需要设置替换假信息， 根据 url:port 去重，todo 相同 tag 命名+1递增
+	// 如果是isSubReq，需要设置替换假信息， 根据 url:port 去重，todo 相同 tag 命名+1递增
 	let linkes = addresses.reduce((accMap, url_arr) => {
 		// url_arr[0] ==> address
 		// url_arr[1] ==> port
 		// url_arr[2] ==> tagname
+		// url_arr[3] ==> v less 完整链接,可能为 undefined
 		// 利用 uniqueAddr【address:port】去重
 		let uniqueAddr = url_arr[0] + ":" + url_arr[1];
 		let old = accMap.get(uniqueAddr);
@@ -1428,7 +1440,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 		}
 		return accMap;
 	}, new Map()).values().toArray().map(m => {
-		return !isSubReq ? m[1] : m[1].replace(new RegExp(userID, 'g'), fakeUserID).replace(new RegExp(host, 'g'), randomDomain);
+		return !isSubReq ? m[1] : m[1].replace(new RegExp(userID, 'gm'), fakeUserID).replace(new RegExp(host, 'gm'), randomDomain);
 	}).join('\n');
 
 	return new Response(btoa(linkes), {
@@ -1549,7 +1561,7 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 // @ts-ignore
 async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDomain, onlyTls) {
 	let ips = (await Promise.all(generStr.split(/[\n,]/).map(async sub => {
-    let url = `https://${sub}/sub?host=${randomDomain}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2560")}`;
+		let url = `https://${sub}/sub?host=${randomDomain}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2560")}`;
 		try {
 			let resp = await fetch(url, {
 				method: 'get',
@@ -1568,7 +1580,7 @@ async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDo
 			return; // 如果有错误，直接返回
 		}
 		// 将假数据还原
-	}))).flat().map(ip => ip.trim().replace(new RegExp(fakeUserID, 'g'), userID).replace(new RegExp(randomDomain, 'g'), host)).filter(Boolean);
+	}))).flat().map(ip => ip.trim().replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(randomDomain, 'gm'), host)).filter(Boolean);
 
 	return parseAddrLinks(ips, true);
 }
@@ -1577,7 +1589,7 @@ function parseAddrLinks(ips, isVess = false) {
 	// abc.com:端口#节点名
 	// 123.123.123.123:端口#节点名
 	// [abc:1234::1]:端口#节点名
-	const urlReg = /^((?:https?:\/\/)?(?:[\w-]+\.)+[a-z]+|\d{1,3}(?:\.\d{1,3}){3}|\[[a-f0-9:]+\])(?::(\d+))?(?:#([^#\n]+))?/i;
+	const urlReg = /^((?:https?:\/\/)?(?:[\w-]+\.)+[a-z]+|\d{1,3}(?:\.\d{1,3}){3}|\[[a-f0-9:]+\])(?::(\d+))?(?:#([^#\n]+)$)?/i;
 	const vlessReg = new RegExp(`^${atob(pt)}:\/\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}${atob(at)}((?:[\w-]+\.)+[a-z]+|\d{1,3}(?:\.\d{1,3}){3}|\[[a-f0-9:]+\]):(\d+)\?[^#\n]+(?:#([^\n]+)$)?`, "i");
 
 	return ips.map(ip => {
