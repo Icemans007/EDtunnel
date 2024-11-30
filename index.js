@@ -20,7 +20,7 @@ const proxyIPs = ['cdn.xn--b6gac.eu.org:443', 'cdn-all.xn--b6gac.eu.org:443'];
 // Randomly select a proxy server from the pool
 let proxyIpPort = proxyIPs[Math.floor(Math.random() * proxyIPs.length)];
 let proxyIP = proxyIpPort.split(':')[0];
-let proxyPort = proxyIpPort.split(':')[1] ?? '443';
+let proxyPort = proxyIpPort.split(':')[1] || '443';
 
 // Alternative configurations:
 // Single proxy IP: let proxyIP = 'cdn.xn--b6gac.eu.org';
@@ -1320,7 +1320,7 @@ function getConfig(userIDs, hostName) {
 // @ts-ignore
 async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DLS, SUBCONVER } = {}) {
 	// 订阅链接转换 clash/sing-box 的服务器后端地址
-	let subconverter = SUBCONVER ?? "https://url.v1.mk"; // 默认使用肥羊后端
+	let subconverter = SUBCONVER || "https://url.v1.mk"; // 默认使用肥羊后端
 	// 订阅转换配置文件
 	let subconfig = "https://raw.githubusercontent.com/cmliu/ACL4SSR/main/Clash/config/ACL4SSR_Online_Full_MultiMode.ini";
 
@@ -1331,15 +1331,11 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 		subconverter = url.searchParams.get("subconverter");
 	}
 
-	let subProtocol = "http";
+	// 连接协议
 	let subconverSplit = subconverter.split("://");
-
-	// 连接协议 有时候是本地服务
-	if (subconverSplit.length > 1) {
-		subProtocol = subconverSplit[0];
-		subconverter = subconverSplit[1];
-	} else {
-		subconverter = subconverSplit[0];
+	if (subconverSplit.length <= 1) {
+		// 有时候是本地服务，所以默认是非TLS
+		subconverter = "http://" + subconverSplit[0];
 	}
 
 	let target = "";
@@ -1365,7 +1361,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 		}
 
 		let suburl = `https://${host}/convertersubrequest`;
-		let ffetch = `${subProtocol}://${subconverter}/sub?target=${target}&url=${encodeURIComponent(suburl)}&insert=false&config=${encodeURIComponent(subconfig)}&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
+		let ffetch = `${subconverter}/sub?target=${target}&url=${encodeURIComponent(suburl)}&insert=false&config=${encodeURIComponent(subconfig)}&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
 
 		try {
 			let response = await fetch(ffetch, {
@@ -1437,7 +1433,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 		let uniqueAddr = url_arr[0] + ":" + url_arr[1];
 		let old = accMap.get(uniqueAddr);
 		if (!(old && old[0].length >= url_arr[2].length)) {
-			let vess = url_arr[3] ?? `${atob(pt)}://${userID}${atob(at)}${url_arr[0]}:${url_arr[1]}?encryption=none&security=${onlyTls ? "tls" : ""}&type=ws&host=${host}&path=${encodeURIComponent("/?ed=2560")}#${encodeURIComponent(url_arr[2] + partTag)}`;
+			let vess = url_arr[3] || `${atob(pt)}://${userID}${atob(at)}${url_arr[0]}:${url_arr[1]}?encryption=none&security=${onlyTls ? "tls" : ""}&type=ws&host=${host}&path=${encodeURIComponent("/?ed=2560")}#${encodeURIComponent(url_arr[2] + partTag)}`;
 			accMap.set(uniqueAddr, [url_arr[2], vess]);
 		}
 		return accMap;
@@ -1464,7 +1460,13 @@ async function getReProxys(add) {
 	let ips = (await Promise.all(add.split(/[\n,]/).map(async str => {
 		if (str.startsWith("api://")) {
 			try {
-				let resp = await fetch(str.slice(6), {
+				let furl = str.slice(6);
+				let converSplit = furl.split("://");
+				if (converSplit.length <= 1) {
+					furl = "https://" + converSplit[0];
+				}
+				
+				let resp = await fetch(furl, {
 					method: 'get',
 					headers: {
 						'Accept': 'text/html,application/xhtml+xml,application/xml;',
@@ -1472,7 +1474,7 @@ async function getReProxys(add) {
 					}
 				});
 				if (!resp.ok) {
-					console.warn('获取地址时出错' + str.slice(6), resp.status, resp.statusText);
+					console.warn('获取地址时出错: ' + furl, resp.status, resp.statusText);
 					return; // 如果有错误，直接返回
 				}
 				return (await resp.text()).split(/[\n,]/);
@@ -1499,6 +1501,11 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 	let ressescsv = cvs.split(/[\n,]/).map(v => v.trim()).filter(Boolean);
 	for (const csvUrl of ressescsv) {
 		try {
+			let converSplit = csvUrl.split("://");
+			if (converSplit.length <= 1) {
+				csvUrl = "https://" + converSplit[0];
+			}
+
 			let resp = await fetch(csvUrl, {
 				method: 'get',
 				headers: {
@@ -1563,15 +1570,12 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 // @ts-ignore
 async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDomain, onlyTls) {
 	let ips = (await Promise.all(generStr.split(/[\n,]/).map(async sub => {
-		let protocol = "https";
 		let converSplit = sub.split("://");
-		if (converSplit.length > 1) {
-			protocol = converSplit[0];
-			sub = converSplit[1];
-		} else {
-			sub = converSplit[0];
+		if (converSplit.length <= 1) {
+			sub = "https://" + converSplit[0];
 		}
-		let url = `${protocol}://${sub}/sub?host=${randomDomain}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2560")}`;
+
+		let url = `${sub}/sub?host=${randomDomain}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2560")}`;
 		try {
 			let resp = await fetch(url, {
 				method: 'get',
