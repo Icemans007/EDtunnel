@@ -1275,7 +1275,9 @@ function getConfig(userIDs, hostName) {
 
 		return `
       <div class="container config-item">
-        <h2>UUID: ${userID}</h2>
+	  	<h2>配置信息</h2>
+        <h3>UUID: ${userID}</h2>
+        <h3>PROXYIP: ${proxyIP}:${proxyPort}</h2>
         <h3>clash 配置</h3>
         <div class="code-container">
           <pre><code>${clash}</code></pre>
@@ -1398,7 +1400,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	let addresses = [];
 
 	// CF IP列表
-	if (url.searchParams.has("cfproxylist") && !url.searchParams.get("cfproxylist")) {
+	if (url.searchParams.get("cfproxylist")) {
 		IPs = url.searchParams.get("cfproxylist").trim().split(",").map(list => "api://" + list).join(',');
 	}
 	if (IPs) {
@@ -1406,7 +1408,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	}
 
 	// CVS CF代理表格
-	if (url.searchParams.has("cfproxycvs") && !url.searchParams.get("cfproxycvs")) {
+	if (url.searchParams.get("cfproxycvs")) {
 		CVS = url.searchParams.get("cfproxycvs");
 	}
 	if (CVS) {
@@ -1414,7 +1416,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	}
 
 	// CF优选生成器
-	if (url.searchParams.has("cfproxygener") && !url.searchParams.get("cfproxygener")) {
+	if (url.searchParams.get("cfproxygener")) {
 		CFProxyGener = url.searchParams.get("cfproxygener");
 	}
 	if (CFProxyGener) {
