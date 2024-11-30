@@ -58,7 +58,7 @@ let enableSocks = false;
 export default {
 	/**
 	 * @param {import("@cloudflare/workers-types").Request} request
-	 * @param {{UUID: string, PROXYIP: string, SOCKS5: string, SOCKS5_RELAY: string}} env
+	 * @param {{UUID: string, PROXYIP: string, SOCKS5: string, SOCKS5_RELAY: boolean}} env
 	 * @param {import("@cloudflare/workers-types").ExecutionContext} _ctx
 	 * @returns {Promise<Response>}
 	 */
@@ -67,6 +67,7 @@ export default {
 			const url = new URL(request.url);
 			const host = request.headers.get('Host');
 			const userAgent = request.headers.get('User-Agent')?.toLowerCase() || '';
+			// @ts-ignore
 			const { UUID, PROXYIP, SOCKS5, SOCKS5_RELAY, IPs, CFProxyGener, CVS, DLS, SUBCONVER } = env;
 
 			userID = UUID || userID;
@@ -75,9 +76,8 @@ export default {
 
 			let requestProxyip = url.searchParams.get("proxyip");
 			if (PROXYIP || requestProxyip) {
-				PROXYIP = requestProxyip || PROXYIP;
 				// Split PROXYIP into an array of proxy addresses
-				const proxyAddresses = PROXYIP.split(/[,\r]/).map(addr => addr.trim()).filter(Boolean);
+				const proxyAddresses = (requestProxyip || PROXYIP).split(/[,\r]/).map(addr => addr.trim()).filter(Boolean);
 				// Randomly select one proxy address
 				const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
 				[proxyIP, proxyPort = '443'] = selectedProxy.split(':');
@@ -108,7 +108,7 @@ export default {
 							headers: { "Content-Type": "application/json;charset=utf-8" },
 						});
 					case `/${userID_Path}`:
-						return new Response(getConfig(userID_Path, host), {
+						return new Response(getConfig(userID, host), {
 							status: 200,
 							headers: { "Content-Type": "text/html; charset=utf-8" },
 						});
@@ -131,8 +131,8 @@ export default {
 					case `/bestip/${userID_Path}`:
 						return fetch(`https://sub.xf.free.hr/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
 					case '/':
+						// @ts-ignore
 						if (env.URL302) return Response.redirect(env.URL302, 302);
-						else if (env.URL) return await proxyURL(env.URL, url);
 					default:
 						return new Response(nginxHtml(), {
 							status: 200,
@@ -466,6 +466,7 @@ async function ProtocolOverWSHandler(request) {
 
 	// ws --> remote
 	readableWebSocketStream.pipeTo(new WritableStream({
+		// @ts-ignore
 		async write(chunk, controller) {
 			if (isDns) {
 				return await handleDNSQuery(chunk, webSocket, null, log);
@@ -510,6 +511,7 @@ async function ProtocolOverWSHandler(request) {
 			if (isDns) {
 				return handleDNSQuery(rawClientData, webSocket, ProtocolResponseHeader, log);
 			}
+			// @ts-ignore
 			HandleTCPOutBound(remoteSocketWapper, addressType, addressRemote, portRemote, rawClientData, webSocket, ProtocolResponseHeader, log);
 		},
 		close() {
@@ -533,7 +535,7 @@ async function ProtocolOverWSHandler(request) {
  * Handles outbound TCP connections for the proxy.
  * Establishes connection to remote server and manages data flow.
  * @param {Socket} remoteSocket - Socket for remote connection
- * @param {string} addressType - Type of address (IPv4/IPv6)
+ * @param {number} addressType - Type of address (IPv4/IPv6)
  * @param {string} addressRemote - Remote server address
  * @param {number} portRemote - Remote server port
  * @param {Uint8Array} rawClientData - Raw data from client
@@ -554,6 +556,7 @@ async function HandleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 					port: port,
 				});
 		}
+		// @ts-ignore
 		remoteSocket.value = tcpSocket;
 		log(`connected to ${address}:${port}`);
 		const writer = tcpSocket.writable.getWriter();
@@ -594,6 +597,7 @@ async function HandleTCPOutBound(remoteSocket, addressType, addressRemote, portR
  * @returns {ReadableStream} Stream of WebSocket data
  */
 function MakeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
+	// @ts-ignore
 	let readableStreamCancel = false;
 	const stream = new ReadableStream({
 		start(controller) {
@@ -1083,6 +1087,7 @@ function socks5AddressParser(address) {
 
 const at = 'QA==';
 const pt = 'dmxlc3M=';
+// @ts-ignore
 const ed = 'RUR0dW5uZWw='; //E-D-tunnel
 
 /**
@@ -1095,7 +1100,7 @@ function getConfig(userIDs, hostName) {
 	const commonUrlPart = `?encryption=none&security=tls&sni=${hostName}&fp=randomized&type=ws&host=${hostName}&path=%2F%3Fed%3D2560#${hostName}`;
 
 	// Split the userIDs into an array
-	const userIDArray = userIDs.split(",");
+	const userIDArray = userIDs.split(/[,\r]/);
 
 	// Prepare output string for each userID
 	const sublink = `https://${hostName}/${userIDArray[0]}/sub`;
@@ -1307,10 +1312,9 @@ function getConfig(userIDs, hostName) {
 
 /**
  * Generates subscription content.
- * @param {string} userID_path - User ID path
- * @param {string} hostname - Host name
- * @returns {string} Subscription content
+ * @returns {Promise<Response>} Subscription content
  */
+// @ts-ignore
 async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DLS, SUBCONVER } = {}) {
 	// 订阅链接转换 clash/sing-box 的服务器后端地址
 	let subconverter = SUBCONVER ?? "https://url.v1.mk"; // 默认使用肥羊后端
@@ -1323,9 +1327,17 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	if (url.searchParams.has("subconverter") && !url.searchParams.get("subconverter")) {
 		subconverter = url.searchParams.get("subconverter");
 	}
+
+	let subProtocol = "http";
 	let subconverSplit = subconverter.split("://");
+	
 	// 连接协议 有时候是本地服务
-	let subProtocol = subconverSplit.length > 1 ? subconverSplit[0] : "http";
+	if (subconverSplit.length > 1) {
+		subProtocol = subconverSplit[0];
+		subconverter = subconverSplit[1];
+	} else {
+		subconverter = subconverSplit[0];
+	}
 
 	let target = "";
 	if (userAgent.includes('clash') || url.searchParams.has('clash')) {
@@ -1360,7 +1372,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 					'User-Agent': userAgent
 				}
 			});
-			if (!resp.ok) {
+			if (!response.ok) {
 				console.warn('请求subconverter结果错误: ' + ffetch, response.status, response.statusText);
 			}
 
@@ -1391,10 +1403,10 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 		addresses = addresses.concat(await getReProxysFromCsv(CVS, onlyTls, DLS));
 	}
 	// CF优选生成器
+	if (url.searchParams.has("cfproxygener") && !url.searchParams.get("cfproxygener")) {
+		CFProxyGener = url.searchParams.get("cfproxygener");
+	}
 	if (CFProxyGener) {
-		if (url.searchParams.has("cfproxygener") && !url.searchParams.get("cfproxygener")) {
-			CFProxyGener = url.searchParams.get("cfproxygener");
-		}
 		addresses = addresses.concat(getReProxysFromGener(CFProxyGener, userID, host, fakeUserID, randomDomain, onlyTls));
 	}
 
@@ -1435,7 +1447,7 @@ async function getReProxys(add) {
 		return [];
 	}
 
-	let ips = await Promise.all(add.split(/[\n,]/).map(async str => {
+	let ips = (await Promise.all(add.split(/[\n,]/).map(async str => {
 		if (str.startsWith("api://")) {
 			try {
 				let resp = await fetch(str.slice(6), {
@@ -1449,14 +1461,14 @@ async function getReProxys(add) {
 					console.warn('获取地址时出错' + str.slice(6), resp.status, resp.statusText);
 					return; // 如果有错误，直接返回
 				}
-				return resp.text().split(/[\n,]/);
+				return (await resp.text()).split(/[\n,]/);
 			} catch (err) {
 				console.error('获取地址时出错', str, err.status, err.statusText);
 				return; // 如果有错误，直接返回
 			}
 		}
 		return str;
-	})).flat().map(ip => ip.trim()).filter(Boolean);
+	}))).flat().map(ip => ip.trim()).filter(Boolean);
 
 	return parseAddrLinks(ips);
 }
@@ -1485,7 +1497,7 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 				continue;
 			}
 
-			let lines = await response.text().split('\n').map(txt => txt.trim()).filter(Boolean);
+			let lines = (await resp.text()).split('\n').map(txt => txt.trim()).filter(Boolean);
 			if (!lines || lines.length === 0) {
 				console.warn('CSV文件为空', csvUrl);
 				continue;
@@ -1534,10 +1546,11 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 	return addresses;
 }
 
-async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDomain) {
-	let ips = await Promise.all(generStr.split(/[\n,]/).map(async sub => {
+// @ts-ignore
+async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDomain, onlyTls) {
+	let ips = (await Promise.all(generStr.split(/[\n,]/).map(async sub => {
+    let url = `https://${sub}/sub?host=${randomDomain}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2560")}`;
 		try {
-			let url = `https://${sub}/sub?host=${randomDomain}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2560")}`;
 			let resp = await fetch(url, {
 				method: 'get',
 				headers: {
@@ -1549,13 +1562,13 @@ async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDo
 				console.warn('获取ProxyGener地址时出错: ' + url, resp.status, resp.statusText);
 				return; // 如果有错误，直接返回
 			}
-			return resp.text().split(/[\n,]/);
+			return (await resp.text()).split(/[\n,]/);
 		} catch (err) {
 			console.error('解析ProxyGener地址时出错', url, err.status, err.statusText);
 			return; // 如果有错误，直接返回
 		}
 		// 将假数据还原
-	})).flat().map(ip => ip.trim().replace(new RegExp(fakeUserID, 'g'), userID).replace(new RegExp(randomDomain, 'g'), host)).filter(Boolean);
+	}))).flat().map(ip => ip.trim().replace(new RegExp(fakeUserID, 'g'), userID).replace(new RegExp(randomDomain, 'g'), host)).filter(Boolean);
 
 	return parseAddrLinks(ips, true);
 }
@@ -1572,7 +1585,7 @@ function parseAddrLinks(ips, isVess = false) {
 		if (isVess) {
 			regExp = vlessReg;
 		}
-		match = regExp.exec(ip);
+		let match = regExp.exec(ip);
 
 		if (!match) {
 			return;
