@@ -1499,7 +1499,7 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 	let addresses = [];
 
 	let ressescsv = cvs.split(/[\n,]/).map(v => v.trim()).filter(Boolean);
-	for (const csvUrl of ressescsv) {
+	for (let csvUrl of ressescsv) {
 		try {
 			let converSplit = csvUrl.split("://");
 			if (converSplit.length <= 1) {
