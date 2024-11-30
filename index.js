@@ -1400,7 +1400,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	let addresses = [];
 
 	// CF IP列表
-	if (url.searchParams.get("cfproxylist")) {
+	if (!isSubReq && url.searchParams.get("cfproxylist")) {
 		IPs = url.searchParams.get("cfproxylist").trim().split(",").map(list => "api://" + list).join(',');
 	}
 	if (IPs) {
@@ -1408,7 +1408,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	}
 
 	// CVS CF代理表格
-	if (url.searchParams.get("cfproxycvs")) {
+	if (!isSubReq && url.searchParams.get("cfproxycvs")) {
 		CVS = url.searchParams.get("cfproxycvs");
 	}
 	if (CVS) {
@@ -1416,7 +1416,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	}
 
 	// CF优选生成器
-	if (url.searchParams.get("cfproxygener")) {
+	if (!isSubReq && url.searchParams.get("cfproxygener")) {
 		CFProxyGener = url.searchParams.get("cfproxygener");
 	}
 	if (CFProxyGener) {
@@ -1563,7 +1563,15 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 // @ts-ignore
 async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDomain, onlyTls) {
 	let ips = (await Promise.all(generStr.split(/[\n,]/).map(async sub => {
-		let url = `https://${sub}/sub?host=${randomDomain}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2560")}`;
+		let protocol = "https";
+		let converSplit = sub.split("://");
+		if (converSplit.length > 1) {
+			protocol = converSplit[0];
+			sub = converSplit[1];
+		} else {
+			sub = converSplit[0];
+		}
+		let url = `${protocol}://${sub}/sub?host=${randomDomain}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2560")}`;
 		try {
 			let resp = await fetch(url, {
 				method: 'get',
