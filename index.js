@@ -112,7 +112,7 @@ export default {
 							status: 200,
 							headers: { "Content-Type": "text/html; charset=utf-8" },
 						});
-					case "/convertersubrequest":
+					case "/convertersubrequest": // 第三方后端订阅转换服务请求
 					case `/${userID_Path}/sub`:	// 包含自适应模式
 						let args = {
 							userID: userID_Path,
@@ -1319,24 +1319,16 @@ function getConfig(userIDs, hostName) {
  */
 // @ts-ignore
 async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DLS, SUBCONVER } = {}) {
+
 	// 订阅链接转换 clash/sing-box 的服务器后端地址
 	let subconverter = SUBCONVER || "https://url.v1.mk"; // 默认使用肥羊后端
 	// 订阅转换配置文件
 	let subconfig = "https://raw.githubusercontent.com/cmliu/ACL4SSR/main/Clash/config/ACL4SSR_Online_Full_MultiMode.ini";
+	// 是否禁止非TLS
+	let onlyTls = true;
 
 	let fakeUserID = generateRandomUUID();
-	let randomDomain = generateRandomStr(12) + ".net";
-
-	if (url.searchParams.has("subconverter") && !url.searchParams.get("subconverter")) {
-		subconverter = url.searchParams.get("subconverter");
-	}
-
-	// 连接协议
-	let subconverSplit = subconverter.split("://");
-	if (subconverSplit.length <= 1) {
-		// 有时候是本地服务，所以默认是非TLS
-		subconverter = "http://" + subconverSplit[0];
-	}
+	let randomDomain = generateRandomStr(12) + [".net",".com",".org",".edu",".cn",".jp",".xyz",".us"].at(Math.random() * 8 | 0);
 
 	let target = "";
 	if (userAgent.includes('clash') || url.searchParams.has('clash')) {
@@ -1347,10 +1339,14 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 		target = "singbox";
 	}
 
-	// 是否是订阅服务请求 https://${host}/convertersubrequest
+	// 是否是第三方后端订阅转换服务请求 https://${host}/convertersubrequest
 	let isSubReq = url.pathname.toLowerCase().startsWith("/convertersubrequest");
 
 	if (target && !isSubReq) {
+		if (url.searchParams.has("subconverter") && !url.searchParams.get("subconverter")) {
+			subconverter = url.searchParams.get("subconverter");
+		}
+
 		if (!subconverter) {
 			return new Response(`缺失后端订阅转换服务 subconverter`, {
 				status: 200,
@@ -1360,7 +1356,19 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 			});
 		}
 
-		let suburl = `https://${host}/convertersubrequest`;
+		// 连接协议
+		let subconverSplit = subconverter.split("://");
+		if (subconverSplit.length < 2) {
+			// 有时候是本地服务，所以默认是非TLS
+			subconverter = "http://" + subconverSplit[0];
+		}
+
+		// suburl token 是映射前后 fakeUserID randomDomain
+		let suburl = `https://${host}/convertersubrequest?`;
+		if (url.search.length > 0) {
+			suburl = `https://${host}/convertersubrequest${url.search}&`;
+		}
+		suburl += `token=${btoa(fakeUserID + "@" + randomDomain)}`;
 		let ffetch = `${subconverter}/sub?target=${target}&url=${encodeURIComponent(suburl)}&insert=false&config=${encodeURIComponent(subconfig)}&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
 
 		try {
@@ -1392,31 +1400,52 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 		}
 	}
 
-	let onlyTls = true;
-	let addresses = [];
+	if (isSubReq) {
+		// 校验第三方后端订阅转换服务请求合法
+		if (!url.searchParams.has('token') || !isBase64(url.searchParams.get('token'))) {
+			return new Response(new Error("Illegal Requests"));
+		}
 
+		let token = atob(url.searchParams.get('token')).split('@');
+		if (token.length !== 2) {
+			return new Response(new Error("Illegal Requests"));
+		}
+
+		[fakeUserID, randomDomain] = token;
+	}
+
+	let addresses = [];
 	// CF IP列表
-	if (!isSubReq && url.searchParams.get("cfproxylist")) {
+	if (url.searchParams.get("cfproxylist")) {
 		IPs = url.searchParams.get("cfproxylist").trim().split(",").map(list => "api://" + list).join(',');
 	}
 	if (IPs) {
-		addresses = addresses.concat(await getReProxys(IPs));
+		let res = await getReProxys(IPs);
+		if (res.length > 0) {
+			addresses = addresses.concat(res);
+		}
 	}
 
 	// CVS CF代理表格
-	if (!isSubReq && url.searchParams.get("cfproxycvs")) {
+	if (url.searchParams.get("cfproxycvs")) {
 		CVS = url.searchParams.get("cfproxycvs");
 	}
 	if (CVS) {
-		addresses = addresses.concat(await getReProxysFromCsv(CVS, onlyTls, DLS));
+		let res = await getReProxysFromCsv(CVS, onlyTls, DLS)
+		if (res.length > 0) {
+			addresses = addresses.concat(res);
+		}
 	}
 
 	// CF优选生成器
-	if (!isSubReq && url.searchParams.get("cfproxygener")) {
+	if (url.searchParams.get("cfproxygener")) {
 		CFProxyGener = url.searchParams.get("cfproxygener");
 	}
 	if (CFProxyGener) {
-		addresses = addresses.concat(getReProxysFromGener(CFProxyGener, userID, host, fakeUserID, randomDomain, onlyTls));
+		let res = await getReProxysFromGener(CFProxyGener, userID, host, fakeUserID, randomDomain, onlyTls);
+		if (res.length > 0) {
+			addresses = addresses.concat(res);
+		}
 	}
 
 	let partTag = "";
@@ -1462,10 +1491,10 @@ async function getReProxys(add) {
 			try {
 				let furl = str.slice(6);
 				let converSplit = furl.split("://");
-				if (converSplit.length <= 1) {
+				if (converSplit.length < 2) {
 					furl = "https://" + converSplit[0];
 				}
-				
+
 				let resp = await fetch(furl, {
 					method: 'get',
 					headers: {
@@ -1502,7 +1531,7 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 	for (let csvUrl of ressescsv) {
 		try {
 			let converSplit = csvUrl.split("://");
-			if (converSplit.length <= 1) {
+			if (converSplit.length < 2) {
 				csvUrl = "https://" + converSplit[0];
 			}
 
@@ -1571,7 +1600,7 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDomain, onlyTls) {
 	let ips = (await Promise.all(generStr.split(/[\n,]/).map(async sub => {
 		let converSplit = sub.split("://");
-		if (converSplit.length <= 1) {
+		if (converSplit.length < 2) {
 			sub = "https://" + converSplit[0];
 		}
 
@@ -1588,13 +1617,15 @@ async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDo
 				console.warn('获取ProxyGener地址时出错: ' + url, resp.status, resp.statusText);
 				return; // 如果有错误，直接返回
 			}
-			return (await resp.text()).split(/[\n,]/);
+			// 可能是base64编码串
+			let encodeStr = await resp.text();
+			return isBase64(encodeStr) ? atob(encodeStr).split('\n') : encodeStr.split('\n');
 		} catch (err) {
 			console.error('解析ProxyGener地址时出错', url, err.status, err.statusText);
 			return; // 如果有错误，直接返回
 		}
 		// 将假数据还原
-	}))).flat().map(ip => ip.trim().replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(randomDomain, 'gm'), host)).filter(Boolean);
+	}))).flat().filter(Boolean).map(ip => ip.trim().replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(randomDomain, 'gm'), host));
 
 	return parseAddrLinks(ips, true);
 }
@@ -1635,4 +1666,15 @@ function generateRandomUUID() {
 
 function generateRandomStr(len) {
 	return Math.random().toString(36).substring(2, len);
+}
+
+function isBase64(str) {
+	if (!str || str.length % 4 !== 0) {
+		return false;
+	}
+	try {
+		return btoa(atob(str)) === str;
+	} catch (err) {
+		return false;
+	}
 }
