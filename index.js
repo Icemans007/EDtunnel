@@ -68,7 +68,7 @@ export default {
 			const host = request.headers.get('Host');
 			const userAgent = request.headers.get('User-Agent')?.toLowerCase() || '';
 			// @ts-ignore
-			const { UUID, PROXYIP, SOCKS5, SOCKS5_RELAY, IPs, CFProxyGener, CVS, DLS, SUBCONVER } = env;
+			const { UUID, PROXYIP, SOCKS5, SOCKS5_RELAY, IPs, CFProxyGener, CVS, DLS, SUBCONVER, SubConverConfig } = env;
 
 			userID = UUID || userID;
 			socks5Address = SOCKS5 || socks5Address;
@@ -125,7 +125,8 @@ export default {
 							CFProxyGener,
 							CVS,
 							DLS,
-							SUBCONVER
+							SUBCONVER,
+							SubConverConfig
 						};
 						return GenSub(args);
 					case `/bestip/${userID_Path}`:
@@ -1318,12 +1319,12 @@ function getConfig(userIDs, hostName) {
  * @returns {Promise<Response>} Subscription content
  */
 // @ts-ignore
-async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DLS, SUBCONVER } = {}) {
+async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DLS, SUBCONVER, SubConverConfig } = {}) {
 
 	// 订阅链接转换 clash/sing-box 的服务器后端地址
 	let subconverter = SUBCONVER || "https://url.v1.mk"; // 默认使用肥羊后端
 	// 订阅转换配置文件
-	let subconfig = "https://raw.githubusercontent.com/cmliu/ACL4SSR/main/Clash/config/ACL4SSR_Online_Full_MultiMode.ini";
+	let subconverterconfig = SubConverConfig || "https://raw.githubusercontent.com/cmliu/ACL4SSR/main/Clash/config/ACL4SSR_Online_Full_MultiMode.ini";
 	// 是否禁止非TLS
 	let onlyTls = true;
 
@@ -1369,7 +1370,8 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 			suburl = `https://${host}/convertersubrequest${url.search}&`;
 		}
 		suburl += `token=${btoa(fakeUserID + "@" + randomDomain)}`;
-		let ffetch = `${subconverter}/sub?target=${target}&url=${encodeURIComponent(suburl)}&insert=false&config=${encodeURIComponent(subconfig)}&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
+		let ffetch = `${subconverter}/sub?target=${target}&url=${encodeURIComponent(suburl)}&insert=false\
+&config=${encodeURIComponent(subconverterconfig)}&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
 
 		try {
 			let response = await fetch(ffetch, {
@@ -1662,6 +1664,9 @@ function parseAddrLinks(ips, isVess = false) {
 		}
 		let [, address, port = "443", tag = address] = match;
 		if (isVess) {
+			if (!match[3]) {
+				ip += ((ip.slice(-1) === "#") ? "" : "#") + encodeURIComponent(tag);
+			}
 			return [address, port, tag, ip];
 		}
 
