@@ -1471,7 +1471,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 &security=${onlyTls ? "tls" : ""}&type=ws&host=${host}&path=${encodeURIComponent("/?ed=2560")}#${encodeURIComponent(url_arr[2])}`;
 			// 换成假数据
 			vess = !isSubReq ? vess : vess.replace(new RegExp(userID, 'gm'), fakeUserID).replace(new RegExp(host, 'gm'), randomDomain);
-			
+
 			// 相同 tagname 递增
 			let tag = "";
 			let num = uniqueTags.get(url_arr[2]);
@@ -1535,15 +1535,15 @@ async function getReProxys(add) {
 
 async function getReProxysFromCsv(cvs, isTls, DLS) {
 	// csv 数据太多，每个只获取前 8 条
-	const MAXROW = 9;
+	const MAXROW = 8;
 	if (!cvs || cvs.length == 0) {
 		return [];
 	}
 
 	let addresses = [];
 
-	let ressescsv = cvs.trim().split(/[\n,]/).map(v => v.trim()).filter(Boolean);
-	for (let csvUrl of ressescsv) {
+	let csvUrls = cvs.trim().split(/[\n,]/).map(v => v.trim()).filter(Boolean);
+	for (let csvUrl of csvUrls) {
 		try {
 			let converSplit = csvUrl.split("://");
 			if (converSplit.length < 2) {
@@ -1583,15 +1583,45 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 			countryColIndex = countryColIndex !== -1 ? countryColIndex : header.indexOf('country');
 			let cityColIndex = header.indexOf('城市');
 			cityColIndex = cityColIndex !== -1 ? cityColIndex : header.indexOf('city');
+			let speedColIndex = header.findLastIndex(item => item.includes("速度") || item.includes("speed"));
+			// 速度一般是最后一个字段
+			if (speedColIndex === -1) {
+				speedColIndex = header.length - 1;
+			}
 
+			// cvs 测速单位
+			let speedUnits = "";
+			if (header[speedColIndex]?.includes('kb')) {
+				speedUnits = "kB";
+			}
+			else if (header[speedColIndex]?.includes('mb')) {
+				speedUnits = "MB";
+			}
+
+			let maxrow = MAXROW;
 			// 从第二行开始遍历CSV行
-			for (let j = (lines.length <= MAXROW ? lines.length : MAXROW), i = 1; i < j; i++) {
+			for (let i = 1; i < lines.length && maxrow > 0; i++) {
 				let columns = lines[i].split(',').map(txt => txt.trim());
-				let speedColIndex = columns.length - 1; // 最后一个字段
+				// 在数据中获取速度单位
+				if (i == 1 && !speedUnits) {
+					if (columns[speedColIndex]?.toLowerCase().includes('kb')) {
+						speedUnits = "kB";
+					} else if (columns[speedColIndex]?.toLowerCase().includes('mb')) {
+						speedUnits = "MB";
+					}
+				}
 
 				if (isTls && columns[tlsColIndex].toLowerCase() !== "true") continue;
-				// 检查速度大于DLS
-				if (DLS > 0 && parseFloat(columns[speedColIndex]) < DLS) continue;
+				// 检查速度大于DLS(DLS 是MB)
+				if (DLS > 0) {
+					let dataSpeed = parseFloat(columns[speedColIndex]);
+					if (speedUnits == "kB") {
+						dataSpeed = Math.round(dataSpeed / 10) / 100;
+					}
+					if (dataSpeed < DLS) {
+						continue;
+					}
+				}
 
 				let tag = "";
 				if (columns[countryColIndex]) tag += columns[countryColIndex] + " ";
@@ -1600,8 +1630,8 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 				if (tag.length === 0) tag += columns[ipColIndex];
 
 				let address = [columns[ipColIndex], columns[portColIndex], tag];
-
 				addresses.push(address);
+				maxrow--;
 			}
 		} catch (err) {
 			console.error('解析CSV文件内容出错', err);
