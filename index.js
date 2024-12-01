@@ -1376,7 +1376,6 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 				method: 'get',
 				headers: {
 					'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
-					'Accept-encoding': 'gzip, deflate, br, zstd',
 					'User-Agent': userAgent
 				}
 			});
@@ -1418,7 +1417,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	let addresses = [];
 	// CF IP列表
 	if (url.searchParams.get("cfproxylist")) {
-		IPs = url.searchParams.get("cfproxylist").trim().split(",").map(list => "api://" + list).join(',');
+		IPs = url.searchParams.get("cfproxylist").split(",").map(list => "api://" + list).join(',');
 	}
 	if (IPs) {
 		let res = await getReProxys(IPs);
@@ -1487,7 +1486,7 @@ async function getReProxys(add) {
 		return [];
 	}
 
-	let ips = (await Promise.all(add.split(/[\n,]/).map(async str => {
+	let ips = (await Promise.all(add.trim().split(/[\n,]/).map(async str => {
 		if (str.startsWith("api://")) {
 			try {
 				let furl = str.slice(6);
@@ -1499,7 +1498,7 @@ async function getReProxys(add) {
 				let resp = await fetch(furl, {
 					method: 'get',
 					headers: {
-						'Accept': 'text/html,application/xhtml+xml,application/xml;',
+						'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
 						'User-Agent': 'v2ray.xray'
 					}
 				});
@@ -1528,7 +1527,7 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 
 	let addresses = [];
 
-	let ressescsv = cvs.split(/[\n,]/).map(v => v.trim()).filter(Boolean);
+	let ressescsv = cvs.trim().split(/[\n,]/).map(v => v.trim()).filter(Boolean);
 	for (let csvUrl of ressescsv) {
 		try {
 			let converSplit = csvUrl.split("://");
@@ -1539,7 +1538,7 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 			let resp = await fetch(csvUrl, {
 				method: 'get',
 				headers: {
-					'Accept': 'text/html,application/xhtml+xml,application/xml;',
+					'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
 					'User-Agent': 'Mozilla/5.0 Chrome/131.0.0.0'
 				}
 			});
@@ -1599,7 +1598,7 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 
 // @ts-ignore
 async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDomain, onlyTls) {
-	let ips = (await Promise.all(generStr.split(/[\n,]/).map(async sub => {
+	let ips = (await Promise.all(generStr.trim().split(/[\n,]/).map(async sub => {
 		let converSplit = sub.split("://");
 		if (converSplit.length < 2) {
 			sub = "https://" + converSplit[0];
@@ -1610,8 +1609,9 @@ async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDo
 			let resp = await fetch(url, {
 				method: 'get',
 				headers: {
-					'Accept': 'text/html,application/json;',
-					'User-Agent': 'v2ray.xray'
+					'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
+					// 'User-Agent': 'v2ray.xray'
+					'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0'
 				}
 			});
 			if (!resp.ok) {
