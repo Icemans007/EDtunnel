@@ -1271,7 +1271,7 @@ function getConfig(userIDs, hostName) {
   ws-opts:
   path: "/?ed=2560"
   headers:
-  	host: ${hostName}`;
+    host: ${hostName}`;
 
 		return `
       <div class="container config-item">
@@ -1351,7 +1351,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 			return new Response(`缺失后端订阅转换服务 subconverter`, {
 				status: 200,
 				headers: {
-					'Content-Type': 'text/html; charset=UTF-8',
+					'Content-Type': 'text/plain; charset=utf-8',
 				}
 			});
 		}
@@ -1375,7 +1375,8 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 			let response = await fetch(ffetch, {
 				method: 'get',
 				headers: {
-					'Accept': 'text/html,text/yaml,application/json,application/x-yaml;',
+					'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
+					'Accept-encoding': 'gzip, deflate, br, zstd',
 					'User-Agent': userAgent
 				}
 			});
@@ -1394,7 +1395,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 			return new Response(`后端订阅转换服务错误`, {
 				status: 200,
 				headers: {
-					'Content-Type': 'text/html; charset=UTF-8',
+					'Content-Type': 'text/plain; charset=utf-8',
 				}
 			});
 		}
@@ -1472,7 +1473,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 
 	return new Response(btoa(linkes), {
 		status: 200,
-		headers: { "Content-Type": "text/html; charset=utf-8" },
+		headers: { "Content-Type": "text/plain; charset=utf-8" },
 	});
 }
 
