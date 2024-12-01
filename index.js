@@ -1328,7 +1328,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	let onlyTls = true;
 
 	let fakeUserID = generateRandomUUID();
-	let randomDomain = generateRandomStr(12) + [".net",".com",".org",".edu",".cn",".jp",".xyz",".us"].at(Math.random() * 8 | 0);
+	let randomDomain = generateRandomStr(12) + [".net", ".com", ".org", ".edu", ".cn", ".jp", ".xyz", ".us"].at(Math.random() * 8 | 0);
 
 	let target = "";
 	if (userAgent.includes('clash') || url.searchParams.has('clash')) {
@@ -1450,9 +1450,10 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 
 	let partTag = "";
 	if (!isSubReq && (host.includes('.workers.dev') || host.includes('pages.dev'))) {
-		partTag += "--请绑定自定义域!";
+		partTag += encodeURIComponent("--请绑定自定义域!");
 	}
-	// 如果是isSubReq，需要设置替换假信息， 根据 url:port 去重，todo 相同 tag 命名+1递增
+	// 如果是isSubReq，需要设置替换为假信息， 根据 address:port 去重， tag相同+1递增
+	let uniqueTags = new Map(Array.from(new Set(addresses.map(m => m[2]))).map(a => [a, 0]));
 	let linkes = addresses.reduce((accMap, url_arr) => {
 		// url_arr[0] ==> address
 		// url_arr[1] ==> port
@@ -1461,14 +1462,26 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 		// 利用 uniqueAddr【address:port】去重
 		let uniqueAddr = url_arr[0] + ":" + url_arr[1];
 		let old = accMap.get(uniqueAddr);
-		if (!(old && old[0].length >= url_arr[2].length)) {
-			let vess = url_arr[3] || `${atob(pt)}://${userID}${atob(at)}${url_arr[0]}:${url_arr[1]}?encryption=none&security=${onlyTls ? "tls" : ""}&type=ws&host=${host}&path=${encodeURIComponent("/?ed=2560")}#${encodeURIComponent(url_arr[2] + partTag)}`;
+		if (!(old && [...decodeURIComponent(old[0])].length >= [...decodeURIComponent(url_arr[2])].length)) {
+
+			// 没有 url_arr[3] 的配置默认链接 
+			let vess = url_arr[3] || `${atob(pt)}://${userID}${atob(at)}${url_arr[0]}:${url_arr[1]}?encryption=none\
+&security=${onlyTls ? "tls" : ""}&type=ws&host=${host}&path=${encodeURIComponent("/?ed=2560")}#${encodeURIComponent(url_arr[2])}`;
+			// 换成假数据
+			vess = !isSubReq ? vess : vess.replace(new RegExp(userID, 'gm'), fakeUserID).replace(new RegExp(host, 'gm'), randomDomain);
+			
+			// 相同 tagname 递增
+			let tag = "";
+			let num = uniqueTags.get(url_arr[2]);
+			uniqueTags.set(url_arr[2], ++num);
+			if (num > 1) {
+				tag = `%20${num}`;
+			}
+			vess += (tag + partTag);
 			accMap.set(uniqueAddr, [url_arr[2], vess]);
 		}
 		return accMap;
-	}, new Map()).values().toArray().map(m => {
-		return !isSubReq ? m[1] : m[1].replace(new RegExp(userID, 'gm'), fakeUserID).replace(new RegExp(host, 'gm'), randomDomain);
-	}).join('\n');
+	}, new Map()).values().toArray().map(m => m[1]).join('\n');
 
 	return new Response(btoa(linkes), {
 		status: 200,
@@ -1610,8 +1623,7 @@ async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDo
 				method: 'get',
 				headers: {
 					'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
-					// 'User-Agent': 'v2ray.xray'
-					'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0'
+					'User-Agent': 'v2ray.xray'
 				}
 			});
 			if (!resp.ok) {
@@ -1636,7 +1648,7 @@ function parseAddrLinks(ips, isVess = false) {
 	// 123.123.123.123:端口#节点名
 	// [abc:1234::1]:端口#节点名
 	const urlReg = /^((?:https?:\/\/)?(?:[\w-]+\.)+[a-z]+|\d{1,3}(?:\.\d{1,3}){3}|\[[a-f0-9:]+\])(?::(\d+))?(?:#([^#\n]+)$)?/i;
-	const vlessReg = new RegExp(`^${atob(pt)}://[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}${atob(at)}((?:[\\w-]+\\.)+[a-z]+|\\d{1,3}(?:\\.\\d{1,3}){3}|\\[[a-f0-9:]+\\]):(\\d+)\\?[^#\\n]+(?:#([^\\n]+)$)?`, "i");
+	const vlessReg = new RegExp(`^${atob(pt)}://[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}${atob(at)}((?:[\\w-]+\\.)+[a-z]+|\\d{1,3}(?:\\.\\d{1,3}){3}|\\[[a-f0-9:]+\\]):(\\d+)\\?[^#]+(?:#([^&]+))?`, "i");
 
 	return ips.map(ip => {
 		let regExp = urlReg;
