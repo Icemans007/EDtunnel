@@ -1501,7 +1501,7 @@ async function getReProxys(add) {
 		return [];
 	}
 
-	let ips = (await Promise.all(add.split(/[\n,]/).map(async str => {
+	let ips = (await Promise.all(add.trim().split(/[\n,]/).map(async str => {
 		if (str.startsWith("api://")) {
 			try {
 				let furl = str.slice(6);
@@ -1528,7 +1528,7 @@ async function getReProxys(add) {
 			}
 		}
 		return str;
-	}))).flat().map(ip => ip.trim()).filter(Boolean);
+	}))).flat().filter(Boolean).map(ip => ip.trim());
 
 	return parseAddrLinks(ips);
 }
