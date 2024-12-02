@@ -1523,7 +1523,7 @@ async function getReProxys(add) {
 				}
 				return (await resp.text()).split(/[\n,]/);
 			} catch (err) {
-				console.error('获取地址时出错', str, err.status, err.statusText);
+				console.error('获取地址时出错: ' + str, err);
 				return; // 如果有错误，直接返回
 			}
 		}
@@ -1670,7 +1670,7 @@ async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDo
 			let encodeStr = await resp.text();
 			return isBase64(encodeStr) ? atob(encodeStr).split('\n') : encodeStr.split('\n');
 		} catch (err) {
-			console.error('解析ProxyGener地址时出错', url, err.status, err.statusText);
+			console.error('解析ProxyGener地址时出错: ' + url, err);
 			return; // 如果有错误，直接返回
 		}
 		// 将假数据还原
