@@ -68,7 +68,7 @@ export default {
 			const host = request.headers.get('Host');
 			const userAgent = request.headers.get('User-Agent')?.toLowerCase() || '';
 			// @ts-ignore
-			const { UUID, PROXYIP, SOCKS5, SOCKS5_RELAY, IPs, CFProxyGener, CVS, DLS, SUBCONVER, SubConverConfig } = env;
+			const { UUID, PROXYIP, SOCKS5, SOCKS5_RELAY, IPs, CFProxyGener, CVS, DLS, SUBCONVER, SubConverMode } = env;
 
 			userID = UUID || userID;
 			socks5Address = SOCKS5 || socks5Address;
@@ -126,7 +126,7 @@ export default {
 							CVS,
 							DLS,
 							SUBCONVER,
-							SubConverConfig
+							SubConverMode
 						};
 						return GenSub(args);
 					case `/bestip/${userID_Path}`:
@@ -1319,12 +1319,12 @@ function getConfig(userIDs, hostName) {
  * @returns {Promise<Response>} Subscription content
  */
 // @ts-ignore
-async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DLS, SUBCONVER, SubConverConfig } = {}) {
+async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DLS, SUBCONVER, SubConverMode } = {}) {
 
 	// 订阅链接转换 clash/sing-box 的服务器后端地址
 	let subconverter = SUBCONVER || "https://url.v1.mk"; // 默认使用肥羊后端
 	// 订阅转换配置文件
-	let subconverterconfig = SubConverConfig || "https://raw.githubusercontent.com/cmliu/ACL4SSR/main/Clash/config/ACL4SSR_Online_Full_MultiMode.ini";
+	let subConverterMode = SubConverMode || "https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/refs/heads/master/Clash/config/ACL4SSR_Online.ini";
 	// 是否禁止非TLS
 	let onlyTls = true;
 
@@ -1371,7 +1371,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 		}
 		suburl += `token=${btoa(fakeUserID + "@" + randomDomain)}`;
 		let ffetch = `${subconverter}/sub?target=${target}&url=${encodeURIComponent(suburl)}&insert=false\
-&config=${encodeURIComponent(subconverterconfig)}&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
+&config=${encodeURIComponent(subConverterMode)}&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
 
 		try {
 			let response = await fetch(ffetch, {
@@ -1451,7 +1451,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	}
 
 	let partTag = "";
-	if (!isSubReq && (host.includes('.workers.dev') || host.includes('pages.dev'))) {
+	if (!isSubReq && (host.endsWith('.workers.dev') || host.endsWith('.pages.dev'))) {
 		partTag += encodeURIComponent("--请绑定自定义域!");
 	}
 	// 如果是isSubReq，需要设置替换为假信息， 根据 address:port 去重， tag相同+1递增
@@ -1497,11 +1497,11 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
  * @returns 
  */
 async function getReProxys(add) {
-	if (!add || add.length == 0) {
+	if (!add || add.trim().length == 0) {
 		return [];
 	}
 
-	let ips = (await Promise.all(add.trim().split(/[\n,]/).map(async str => {
+	let ips = (await Promise.all(add.split(/[\n,]/).map(async str => {
 		if (str.startsWith("api://")) {
 			try {
 				let furl = str.slice(6);
@@ -1534,15 +1534,15 @@ async function getReProxys(add) {
 }
 
 async function getReProxysFromCsv(cvs, isTls, DLS) {
-	// csv 数据太多，每个只获取前 8 条
-	const MAXROW = 8;
-	if (!cvs || cvs.length == 0) {
+	if (!cvs || cvs.trim().length == 0) {
 		return [];
 	}
+	// csv 数据太多，每个只获取前 8 条
+	const MAXROW = 8;
 
 	let addresses = [];
 
-	let csvUrls = cvs.trim().split(/[\n,]/).map(v => v.trim()).filter(Boolean);
+	let csvUrls = cvs.split(/[\n,]/).map(v => v.trim()).filter(Boolean);
 	for (let csvUrl of csvUrls) {
 		try {
 			let converSplit = csvUrl.split("://");
@@ -1643,7 +1643,11 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 
 // @ts-ignore
 async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDomain, onlyTls) {
-	let ips = (await Promise.all(generStr.trim().split(/[\n,]/).map(async sub => {
+	if (!generStr || generStr.trim().length == 0) {
+		return [];
+	}
+
+	let ips = (await Promise.all(generStr.trim().split(/[\n,]/).map(v => v.trim()).map(async sub => {
 		let converSplit = sub.split("://");
 		if (converSplit.length < 2) {
 			sub = "https://" + converSplit[0];
