@@ -1497,44 +1497,56 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
  * @returns 
  */
 async function getReProxys(add) {
-	if (!add || add.trim().length == 0) {
+	if (!add || (add = add.trim()).length == 0) {
 		return [];
 	}
-
-	let ips = (await Promise.all(add.trim().split(/[\n,]/).map(async str => {
-		if (str.startsWith("api://")) {
-			try {
+	// 避免 api:// 的链接调用循环
+	let apiReference = new Set();
+	let inner = async function (add) {
+		return (await Promise.all(add.split('\n').map(async str => {
+			if (str.startsWith("api://")) {
 				let furl = str.slice(6);
 				let converSplit = furl.split("://");
 				if (converSplit.length < 2) {
 					furl = "https://" + converSplit[0];
 				}
+				if (apiReference.has(furl)) {
+					return;
+				}
+				apiReference.add(furl);
 
-				let resp = await fetch(furl, {
-					method: 'get',
-					headers: {
-						'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
-						'User-Agent': 'v2ray.xray'
+				try {
+					let resp = await fetch(furl, {
+						method: 'get',
+						headers: {
+							'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
+							'User-Agent': 'Mozilla/5.0 Chrome/131.0.0.0'
+						}
+					});
+					if (!resp.ok) {
+						console.warn('获取地址时出错: ' + furl, resp.status, resp.statusText);
+						return; // 如果有错误，直接返回
 					}
-				});
-				if (!resp.ok) {
-					console.warn('获取地址时出错: ' + furl, resp.status, resp.statusText);
+
+					// 回调处理文件有 api://  的链接
+					return inner(await resp.text());
+				} catch (err) {
+					console.error('获取地址时出错: ' + str, err);
 					return; // 如果有错误，直接返回
 				}
-				return (await resp.text()).split(/[\n,]/);
-			} catch (err) {
-				console.error('获取地址时出错: ' + str, err);
-				return; // 如果有错误，直接返回
 			}
-		}
-		return str;
-	}))).flat().filter(Boolean).map(ip => ip.trim());
+
+			return str;
+		}))).flat().filter(Boolean).map(ip => ip.trim());
+	}
+
+	let ips = await inner(add.replace(',', '\n'));
 
 	return parseAddrLinks(ips);
 }
 
 async function getReProxysFromCsv(cvs, isTls, DLS) {
-	if (!cvs || cvs.trim().length == 0) {
+	if (!cvs || (cvs = cvs.trim()).length == 0) {
 		return [];
 	}
 	// csv 数据太多，每个只获取前 8 条
@@ -1542,14 +1554,14 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 
 	let addresses = [];
 
-	let csvUrls = cvs.split(/[\n,]/).map(v => v.trim()).filter(Boolean);
+	let csvUrls = cvs.split(/[\n,]/).map(v => v.trim());
 	for (let csvUrl of csvUrls) {
-		try {
-			let converSplit = csvUrl.split("://");
-			if (converSplit.length < 2) {
-				csvUrl = "https://" + converSplit[0];
-			}
+		let converSplit = csvUrl.split("://");
+		if (converSplit.length < 2) {
+			csvUrl = "https://" + converSplit[0];
+		}
 
+		try {
 			let resp = await fetch(csvUrl, {
 				method: 'get',
 				headers: {
@@ -1613,8 +1625,8 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 
 				if (isTls && columns[tlsColIndex].toLowerCase() !== "true") continue;
 				// 检查速度大于DLS(DLS 是MB)
-				if (DLS > 0) {
-					let dataSpeed = parseFloat(columns[speedColIndex]);
+				let dataSpeed = parseFloat(columns[speedColIndex]);
+				if (DLS > 0 && !isNaN(dataSpeed)) {
 					if (speedUnits == "kB") {
 						dataSpeed = Math.round(dataSpeed / 10) / 100;
 					}
@@ -1643,38 +1655,85 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 
 // @ts-ignore
 async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDomain, onlyTls) {
-	if (!generStr || generStr.trim().length == 0) {
+	if (!generStr || (generStr = generStr.trim()).length == 0) {
 		return [];
 	}
 
-	let ips = (await Promise.all(generStr.trim().split(/[\n,]/).map(v => v.trim()).map(async sub => {
-		let converSplit = sub.split("://");
-		if (converSplit.length < 2) {
-			sub = "https://" + converSplit[0];
-		}
+	let apiReference = new Set();
+	let generNum = new Set();
 
-		let url = `${sub}/sub?host=${randomDomain}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2560")}`;
-		try {
-			let resp = await fetch(url, {
-				method: 'get',
-				headers: {
-					'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
-					'User-Agent': 'v2ray.xray'
+	let inner = async function (generStr) {
+		return (await Promise.all(generStr.split('\n').map(v => v.trim()).map(async sub => {
+			// 获取订阅的url
+			if (sub.startsWith("api://")) {
+				let furl = sub.slice(6);
+				let converSplit = furl.split("://");
+				if (converSplit.length < 2) {
+					furl = "https://" + converSplit[0];
 				}
-			});
-			if (!resp.ok) {
-				console.warn('获取ProxyGener地址时出错: ' + url, resp.status, resp.statusText);
+				// 解除循环链接引用
+				if (apiReference.has(furl)) {
+					return;
+				}
+				apiReference.add(furl);
+				try {
+					let resp = await fetch(furl, {
+						method: 'get',
+						headers: {
+							'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
+							'User-Agent': 'Mozilla/5.0 Chrome/131.0.0.0'
+						}
+					});
+					if (!resp.ok) {
+						console.warn('获取地址时出错: ' + furl, resp.status, resp.statusText);
+						return; // 如果有错误，直接返回
+					}
+
+					return inner(await resp.text());
+				} catch (err) {
+					console.error('获取地址时出错: ' + sub, err);
+					return; // 如果有错误，直接返回
+				}
+			}
+
+			// 订阅器地址
+			let converSplit = sub.split("://");
+			if (converSplit.length < 2) {
+				sub = "https://" + converSplit[0];
+			}
+			// 一个Gener 生成的订阅地址够大，所以只允许3个
+			if (generNum.has(sub) || generNum.size >= 3) {
+				return;
+			}
+			generNum.add(sub);
+
+			let url = `${sub}/sub?host=${randomDomain}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2560")}`;
+			try {
+				let resp = await fetch(url, {
+					method: 'get',
+					headers: {
+						'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
+						'User-Agent': 'v2ray.xray'
+					}
+				});
+				if (!resp.ok) {
+					console.warn('获取ProxyGener地址时出错: ' + url, resp.status, resp.statusText);
+					return; // 如果有错误，直接返回
+				}
+				// 可能是base64编码串
+				let encodeStr = await resp.text();
+				// 将假数据还原
+				encodeStr = (isBase64(encodeStr) ? atob(encodeStr) : encodeStr).replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(randomDomain, 'gm'), host);
+
+				return encodeStr.split('\n');
+			} catch (err) {
+				console.error('解析ProxyGener地址时出错: ' + url, err);
 				return; // 如果有错误，直接返回
 			}
-			// 可能是base64编码串
-			let encodeStr = await resp.text();
-			return isBase64(encodeStr) ? atob(encodeStr).split('\n') : encodeStr.split('\n');
-		} catch (err) {
-			console.error('解析ProxyGener地址时出错: ' + url, err);
-			return; // 如果有错误，直接返回
-		}
-		// 将假数据还原
-	}))).flat().filter(Boolean).map(ip => ip.trim().replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(randomDomain, 'gm'), host));
+		}))).flat().filter(Boolean).map(ip => ip.trim());
+	}
+
+	let ips = await inner(generStr.replace(',', '\n'));
 
 	return parseAddrLinks(ips, true);
 }
