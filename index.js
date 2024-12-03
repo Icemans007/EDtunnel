@@ -1341,7 +1341,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	let isSubReq = url.pathname.toLowerCase().startsWith("/convertersubrequest");
 
 	if (target && !isSubReq) {
-		if (url.searchParams.has("subconverter") && !url.searchParams.get("subconverter")) {
+		if (url.searchParams.get("subconverter")?.trim()) {
 			subconverter = url.searchParams.get("subconverter");
 		}
 
