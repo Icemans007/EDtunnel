@@ -1425,8 +1425,8 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 
 	let addresses = [];
 	// CF IP列表
-	if (url.searchParams.get("cfproxylist")) {
-		IPs = url.searchParams.get("cfproxylist").split(",").map(list => "api://" + list).join(',');
+	if (url.searchParams.has("cfproxylist")) {
+		IPs = url.searchParams.get("cfproxylist")?.trim().split(",").map(list => "api://" + list).join(',');
 	}
 	if (IPs) {
 		let res = await getReProxys(IPs);
@@ -1436,7 +1436,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	}
 
 	// CVS CF代理表格
-	if (url.searchParams.get("cfproxycvs")) {
+	if (url.searchParams.has("cfproxycvs")) {
 		CVS = url.searchParams.get("cfproxycvs");
 	}
 	if (CVS) {
@@ -1447,7 +1447,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	}
 
 	// CF优选生成器
-	if (url.searchParams.get("cfproxygener")) {
+	if (url.searchParams.has("cfproxygener")) {
 		CFProxyGener = url.searchParams.get("cfproxygener");
 	}
 	if (CFProxyGener) {
@@ -1510,7 +1510,8 @@ async function getReProxys(add) {
 	// 避免 api:// 的链接调用循环
 	let apiReference = new Set();
 	let inner = async function (add) {
-		return (await Promise.all(add.split('\n').map(async str => {
+		return (await Promise.all(add.split('\n').map(v => v.trim()).map(async str => {
+			if (str.charAt(0) === '#') return;
 			if (str.startsWith("api://")) {
 				let furl = str.slice(6);
 				let converSplit = furl.split("://");
@@ -1671,6 +1672,7 @@ async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDo
 
 	let inner = async function (generStr) {
 		return (await Promise.all(generStr.split('\n').map(v => v.trim()).map(async sub => {
+			if (sub.charAt(0) === '#') return;
 			// 获取订阅的url
 			if (sub.startsWith("api://")) {
 				let furl = sub.slice(6);
