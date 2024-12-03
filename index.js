@@ -77,7 +77,7 @@ export default {
 			let requestProxyip = url.searchParams.get("proxyip")?.trim() || PROXYIP.trim();
 			if (requestProxyip) {
 				// Split PROXYIP into an array of proxy addresses
-				const proxyAddresses = requestProxyip.split(/[,\r]/).map(addr => addr.trim());
+				const proxyAddresses = requestProxyip.split(/[,\n]/).map(addr => addr.trim());
 				// Randomly select one proxy address
 				const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
 				[proxyIP, proxyPort = '443'] = selectedProxy.split(':');
@@ -98,7 +98,7 @@ export default {
 				}
 			}
 
-			const userID_Path = userID.split(/[,\r]/)[0];
+			const userID_Path = userID.split(/[,\n]/)[0];
 
 			if (request.headers.get('Upgrade') !== 'websocket') {
 				switch (url.pathname.toLowerCase().replace(/\/+$/, '')) {
@@ -1101,7 +1101,7 @@ function getConfig(userIDs, hostName) {
 	const commonUrlPart = `?encryption=none&security=tls&sni=${hostName}&fp=randomized&type=ws&host=${hostName}&path=%2F%3Fed%3D2560#${hostName}`;
 
 	// Split the userIDs into an array
-	const userIDArray = userIDs.split(/[,\r]/);
+	const userIDArray = userIDs.split(/[,\n]/);
 
 	// Prepare output string for each userID
 	const sublink = `https://${hostName}/${userIDArray[0]}/sub`;
