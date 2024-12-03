@@ -74,7 +74,7 @@ export default {
 			socks5Address = SOCKS5 || socks5Address;
 			socks5Relay = SOCKS5_RELAY || socks5Relay;
 
-			let requestProxyip = url.searchParams.get("proxyip").trim() || PROXYIP.trim();
+			let requestProxyip = url.searchParams.get("proxyip")?.trim() || PROXYIP?.trim();
 			if (requestProxyip) {
 				// Split PROXYIP into an array of proxy addresses
 				const proxyAddresses = requestProxyip.split(/[,\r]/).map(addr => addr.trim());
