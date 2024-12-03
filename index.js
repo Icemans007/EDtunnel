@@ -74,7 +74,7 @@ export default {
 			socks5Address = SOCKS5 || socks5Address;
 			socks5Relay = SOCKS5_RELAY || socks5Relay;
 
-			let requestProxyip = url.searchParams.get("proxyip")?.trim() || PROXYIP?.trim();
+			let requestProxyip = url.searchParams.get("proxyip")?.trim() || PROXYIP.trim();
 			if (requestProxyip) {
 				// Split PROXYIP into an array of proxy addresses
 				const proxyAddresses = requestProxyip.split(/[,\r]/).map(addr => addr.trim());
@@ -129,8 +129,8 @@ export default {
 							SubConverMode
 						};
 						return GenSub(args);
-					case `/bestip/${userID_Path}`:
-						return fetch(`https://sub.xf.free.hr/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
+					// case `/bestip/${userID_Path}`:
+					// 	return fetch(`https://sub.xf.free.hr/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
 					case '/':
 						// @ts-ignore
 						if (env.URL302) return Response.redirect(env.URL302, 302);
@@ -1232,16 +1232,14 @@ function getConfig(userIDs, hostName) {
 	const header = `
     <div class="container">
       <h1>EDtunnel: Protocol Configuration</h1>
-      <img src="https://ipfs.io/ipfs/bafybeigd6i5aavwpr6wvnwuyayklq3omonggta4x2q7kpmgafj357nkcky" alt="EDtunnel Logo" class="logo">
       <p>Welcome! This function generates configuration for the vless protocol. If you found this useful, please check our GitHub project:</p>
-      <p><a href="https://github.com/6Kmfi6HP/EDtunnel" target="_blank" style="color: #00ff00;">EDtunnel - https://github.com/6Kmfi6HP/EDtunnel</a></p>
+      <p><a href="https://github.com/Icemans007/EDtunnel" target="_blank" style="color: #00ff00;">EDtunnel - https://github.com/Icemans007/EDtunnel</a></p>
       <div style="clear: both;"></div>
       <div class="btn-group">
         <a href="${sublink}" class="btn" target="_blank"><i class="fas fa-link"></i>自适应订阅（推荐！）</a>
         <a href="clash://install-config?url=${encodeURIComponent(sublink + "?clash")}" class="btn" target="_blank"><i class="fas fa-bolt"></i> Clash-Meta 订阅</a>
         <a href="${sublink}?clash" class="btn" target="_blank"><i class="fas fa-bolt"></i> Clash Link</a>
         <a href="${sublink}?singbox" class="btn" target="_blank"><i class="fas fa-star"></i> Singbox Link</a>
-		<a href="${subbestip}" class="btn" target="_blank"><i class="fas fa-star"></i> Best IP Subscription</a>
       </div>
       <div class="subscription-info">
         <h3>选项说明:</h3>
@@ -1250,7 +1248,6 @@ function getConfig(userIDs, hostName) {
           <li><strong>Clash-Meta 订阅:</strong> 打开具有预配置设置的 Clash 客户端。最适合移动设备上的 Clash 用户。</li>
           <li><strong>Clash-Meta Link:</strong> 用于将 Clash 配置转换为 Clash 格式的 Web 链接。对于手动导入或故障排除很有用。</li>
           <li><strong>Singbox Link:</strong> 用于将 Singbox 的 Web 链接。对于手动导入或故障排除很有用。</li>
-		  <li><strong>Best IP Subscription:</strong> Provides a curated list of optimal server IPs for many <b>different countries</b>.</li>
         </ul>
         <p>选择最适合您的客户和需求的选项。</p>
       </div>
@@ -1277,8 +1274,8 @@ function getConfig(userIDs, hostName) {
 		return `
       <div class="container config-item">
 	  	<h2>配置信息</h2>
-        <h3>UUID: ${userID}</h2>
-        <h3>PROXYIP: ${proxyIP}:${proxyPort}</h2>
+        <h4>UUID: ${userID}</h2>
+        <h4>PROXYIP: ${proxyIP}:${proxyPort}</h2>
         <h3>clash 配置</h3>
         <div class="code-container">
           <pre><code>${clash}</code></pre>
@@ -1322,7 +1319,7 @@ function getConfig(userIDs, hostName) {
 async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DLS, SUBCONVER, SubConverMode } = {}) {
 
 	// 订阅链接转换 clash/sing-box 的服务器后端地址
-	let subconverter = SUBCONVER || "https://url.v1.mk"; // 默认使用肥羊后端
+	let subconverter = SUBCONVER;
 	// 订阅转换配置文件
 	let subConverterMode = SubConverMode || "https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/refs/heads/master/Clash/config/ACL4SSR_Online.ini";
 	// 是否禁止非TLS
@@ -1349,10 +1346,10 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 		}
 
 		if (!subconverter) {
-			return new Response(`缺失后端订阅转换服务 subconverter`, {
-				status: 200,
+			return new Response(`服务没有绑定后端订阅转换服务，请使用"&subconverter="传递订阅转换服务地址`, {
+				status: 412,
 				headers: {
-					'Content-Type': 'text/plain; charset=utf-8',
+					'Content-Type': 'text/html; charset=utf-8',
 				}
 			});
 		}
@@ -1394,7 +1391,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 		} catch (err) {
 			console.error('请求subconverter地址时出错: ' + ffetch, err);
 			return new Response(`后端订阅转换服务错误`, {
-				status: 200,
+				status: 500,
 				headers: {
 					'Content-Type': 'text/plain; charset=utf-8',
 				}
@@ -1405,12 +1402,22 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	if (isSubReq) {
 		// 校验第三方后端订阅转换服务请求合法
 		if (!url.searchParams.has('token') || !isBase64(url.searchParams.get('token'))) {
-			return new Response(new Error("Illegal Requests"));
+			return new Response(new Error("Illegal Requests"), {
+				status: 403,
+				headers: {
+					'Content-Type': 'text/html;charset=UTF-8',
+				}
+			});
 		}
 
 		let token = atob(url.searchParams.get('token')).split('@');
 		if (token.length !== 2) {
-			return new Response(new Error("Illegal Requests"));
+			return new Response(new Error("Illegal Requests"), {
+				status: 403,
+				headers: {
+					'Content-Type': 'text/html;charset=UTF-8',
+				}
+			});
 		}
 
 		[fakeUserID, randomDomain] = token;
