@@ -87,7 +87,7 @@ export default {
 			if (socks5Address) {
 				try {
 					// Split SOCKS5 into an array of addresses
-					const socks5Addresses = socks5Address.split(',').map(addr => addr.trim());
+					const socks5Addresses = socks5Address.split(/[,\n]/).map(addr => addr.trim());
 					// Randomly select one SOCKS5 address
 					const selectedSocks5 = socks5Addresses[Math.floor(Math.random() * socks5Addresses.length)];
 					parsedSocks5Address = socks5AddressParser(selectedSocks5);
@@ -1524,12 +1524,23 @@ async function getReProxys(add) {
 				apiReference.add(furl);
 
 				try {
+					const controller = new AbortController();
+					const id = setTimeout(() => controller.abort(), 5000);
 					let resp = await fetch(furl, {
 						method: 'get',
 						headers: {
 							'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
 							'User-Agent': 'Mozilla/5.0 Chrome/131.0.0.0'
+						},
+						signal: controller.signal,
+					}).finally(() => {
+						clearTimeout(id);
+					}).catch(error => {
+						if (error.name === 'AbortError') {
+							console.warn('请求超时: ' + furl, error);
+							return;
 						}
+						throw error;
 					});
 					if (!resp.ok) {
 						console.warn('获取地址时出错: ' + furl, resp.status, resp.statusText);
@@ -1612,7 +1623,7 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 			// cvs 测速单位
 			let speedUnits = "";
 			if (header[speedColIndex]?.includes('kb')) {
-				speedUnits = "kB";
+				speedUnits = "KB";
 			}
 			else if (header[speedColIndex]?.includes('mb')) {
 				speedUnits = "MB";
@@ -1625,7 +1636,7 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 				// 在数据中获取速度单位
 				if (i == 1 && !speedUnits) {
 					if (columns[speedColIndex]?.toLowerCase().includes('kb')) {
-						speedUnits = "kB";
+						speedUnits = "KB";
 					} else if (columns[speedColIndex]?.toLowerCase().includes('mb')) {
 						speedUnits = "MB";
 					}
@@ -1635,7 +1646,7 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 				// 检查速度大于DLS(DLS 是MB)
 				let dataSpeed = parseFloat(columns[speedColIndex]);
 				if (DLS > 0 && !isNaN(dataSpeed)) {
-					if (speedUnits == "kB") {
+					if (speedUnits == "KB") {
 						dataSpeed = Math.round(dataSpeed / 10) / 100;
 					}
 					if (dataSpeed < DLS) {
