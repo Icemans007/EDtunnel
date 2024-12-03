@@ -74,10 +74,10 @@ export default {
 			socks5Address = SOCKS5 || socks5Address;
 			socks5Relay = SOCKS5_RELAY || socks5Relay;
 
-			let requestProxyip = url.searchParams.get("proxyip");
-			if (PROXYIP || requestProxyip) {
+			let requestProxyip = url.searchParams.get("proxyip").trim() || PROXYIP.trim();
+			if (requestProxyip) {
 				// Split PROXYIP into an array of proxy addresses
-				const proxyAddresses = (requestProxyip || PROXYIP).split(/[,\r]/).map(addr => addr.trim()).filter(Boolean);
+				const proxyAddresses = requestProxyip.split(/[,\r]/).map(addr => addr.trim());
 				// Randomly select one proxy address
 				const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
 				[proxyIP, proxyPort = '443'] = selectedProxy.split(':');
