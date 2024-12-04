@@ -119,7 +119,7 @@ export default {
 							headers: { "Content-Type": "text/html; charset=utf-8" },
 						});
 					case "/convertersubrequest": // 第三方后端订阅转换服务请求
-					case `/${userID_Path}/sub`:	// 包含自适应模式
+					case `/sub/${userID_Path}`:	// 包含自适应模式
 						let args = {
 							userID: userID_Path,
 							host,
@@ -1110,7 +1110,7 @@ function getConfig(userIDs, hostName) {
 	const userIDArray = userIDs.split(',');
 
 	// Prepare output string for each userID
-	const sublink = `https://${hostName}/${userIDArray[0]}/sub`;
+	const sublink = `https://${hostName}/sub/${userIDArray[0]}`;
 	// const subbestip = `https://${hostName}/bestip/${userIDArray[0]}`;
 	// HTML Head with CSS and FontAwesome library
 	const htmlHead = `
@@ -1313,10 +1313,7 @@ function getConfig(userIDs, hostName) {
 		let codehtml = function (partType) {
 			let html = '';
 			for (let code of partType) {
-				html += `<div class="code-container">
-					<pre><code>${code}</code></pre>
-					<button class="btn copy-btn" onclick='copyToClipboard("${encodeURIComponent(code)}")'><i class="fas fa-copy"></i> 复制</button>
-				</div>`;
+				html += `${code}\n`;
 			}
 			return html;
 		};
@@ -1326,10 +1323,16 @@ function getConfig(userIDs, hostName) {
 	  	<h2>代理配置</h2>
         <h4>UUID: ${userID}</h2>
         <h4>PROXYIP: ${proxyIP}:${proxyPort}</h2>
-        <h3>clash 配置</h3>
-          ${codehtml(clashPart)}
         <h3>vless 配置</h3>
-		  ${codehtml(vessPart)}
+		<div class="code-container">
+		  <pre><code>${codehtml(vessPart)}</code></pre>
+		  <button class="btn copy-btn" onclick='copyToClipboard("${encodeURIComponent(codehtml(vessPart))}")'><i class="fas fa-copy"></i> 复制</button>
+		</div>
+        <h3>clash 配置</h3>
+		<div class="code-container">
+		  <pre><code>${codehtml(clashPart)}</code></pre>
+		  <button class="btn copy-btn" onclick='copyToClipboard("${encodeURIComponent(codehtml(clashPart))}")'><i class="fas fa-copy"></i> 复制</button>
+		</div>
       </div>
     `;
 	}).join('');
@@ -1371,11 +1374,11 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 	let randomDomain = generateRandomStr(12) + [".net", ".com", ".org", ".edu", ".cn", ".jp", ".xyz", ".us"].at(Math.random() * 8 | 0);
 
 	let target = "";
-	if (userAgent.includes('clash') || url.searchParams.has('clash')) {
+	if (url.searchParams.has('clash') || userAgent.includes('clash')) {
 		target = "clash";
 	}
-	if (userAgent.includes('singbox') || userAgent.includes('sing-box')
-		|| url.searchParams.has('singbox') || url.searchParams.has('sing-box')) {
+	else if (url.searchParams.has('singbox') || url.searchParams.has('sing-box')
+		|| userAgent.includes('singbox') || userAgent.includes('sing-box')) {
 		target = "singbox";
 	}
 
