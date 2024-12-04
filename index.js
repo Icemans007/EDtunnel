@@ -69,7 +69,7 @@ export default {
 			const host = request.headers.get('Host');
 			const userAgent = request.headers.get('User-Agent')?.toLowerCase() || '';
 			// @ts-ignore
-			const { UUID, PROXYIP, SOCKS5, SOCKS5_RELAY, ADD, CF_PROXY_GENER, CVS, DLS, SUBCONVER, ACL4SSR_CONFIG, ONLYTLS = false } = env;
+			const { UUID, PROXYIP, SOCKS5, SOCKS5_RELAY, ADD, CF_PROXY_GENER, CVS, DLS, SUBCONVER, ACL4SSR_CONFIG, ONLYTLS = true } = env;
 
 			userID = UUID?.replaceAll('\n', ',') || userID;
 			if (userID.split(',').some(uuid => !isValidUUID(uuid.trim()))) {
