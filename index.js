@@ -125,8 +125,7 @@ export default {
 							host,
 							url,
 							userAgent,
-							proxyIP,
-							proxyPort,
+							PROXYIP,
 							ADD,
 							CF_PROXY_GENER,
 							CVS,
@@ -163,7 +162,7 @@ export default {
  * @param {*} PROXYIP
  * @param {*} host
  */
-async function processProxyip(url, PROXYIP, host) {
+async function processProxyip(url, PROXYIP, host, fetch = false) {
 
 	let proxyIP, proxyPort;
 	let requestProxyip = url.searchParams.get("proxyip") || url.searchParams.get("pyip");
@@ -175,7 +174,7 @@ async function processProxyip(url, PROXYIP, host) {
 		[proxyIP, proxyPort = '443'] = selectedProxy.split(':');
 	}
 	else if (PROXYIP) {
-		const proxyAddresses = await fetchConfig(PROXYIP.trim().replaceAll(',', '\n'));
+		const proxyAddresses = await fetchConfig(PROXYIP.trim().replaceAll(',', '\n'), fetch);
 		const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
 		[proxyIP, proxyPort = '443'] = selectedProxy.split(':');
 	}
@@ -1266,7 +1265,7 @@ function getConfig(userIDs, hostName) {
 		let clashPart = [];
 
 		vessPart = vessPart.concat(Array.from(HttpsPort).map(port => {
-			const urlPart = `${hostName}-HTTPS-${port}`;
+			const urlPart = encodeURIComponent(`${hostName}-HTTPS-${port}`);
 			return atob(pt) + '://' + userID + atob(at) + hostName + ':' + port + commonUrlPartHttps + urlPart;
 		}));
 
@@ -1289,7 +1288,7 @@ function getConfig(userIDs, hostName) {
 
 		if (!onlyTls) {
 			vessPart = vessPart.concat(Array.from(HttpPort).map(port => {
-				const urlPart = `${hostName}-HTTP-${port}`;
+				const urlPart = encodeURIComponent(`${hostName}-HTTP-${port}`);
 				return atob(pt) + '://' + userID + atob(at) + hostName + ':' + port + commonUrlPartHttp + urlPart;
 			}));
 
@@ -1316,7 +1315,7 @@ function getConfig(userIDs, hostName) {
 			for (let code of partType) {
 				html += `<div class="code-container">
 					<pre><code>${code}</code></pre>
-					<button class="btn copy-btn" onclick='copyToClipboard("${code}")'><i class="fas fa-copy"></i> 复制</button>
+					<button class="btn copy-btn" onclick='copyToClipboard("${encodeURIComponent(code)}")'><i class="fas fa-copy"></i> 复制</button>
 				</div>`;
 			}
 			return html;
@@ -1361,7 +1360,7 @@ function getConfig(userIDs, hostName) {
  * @returns {Promise<Response>} Subscription content
  */
 // @ts-ignore
-async function GenSub({ userID, host, userAgent, url, ADD, CF_PROXY_GENER, CVS, DLS, SUBCONVER, ACL4SSR_CONFIG, onlyTls } = {}) {
+async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GENER, CVS, DLS, SUBCONVER, ACL4SSR_CONFIG, onlyTls } = {}) {
 
 	// 订阅链接转换 clash/sing-box 的服务器后端地址
 	let subconverter = SUBCONVER;
@@ -1504,8 +1503,13 @@ async function GenSub({ userID, host, userAgent, url, ADD, CF_PROXY_GENER, CVS, 
 	if (!isSubReq && (host.includes('.workers.dev') || host.includes('.pages.dev'))) {
 		partTag += encodeURIComponent("--请绑定自定义域!");
 	}
+
+	// 这里query proxyip 会多一个api请求获取proxyip过程
+	let [proxyIP, proxyPort] = await processProxyip(url, PROXYIP, host, true);
+
 	// 如果是isSubReq，需要设置替换为假信息， 根据 address:port 去重， tag相同+1递增
 	let uniqueTags = new Map(Array.from(new Set(addresses.map(m => m[2]))).map(a => [a, 0]));
+
 	let linkes = addresses.reduce((accMap, url_arr) => {
 		// url_arr[0] ==> address
 		// url_arr[1] ==> port
@@ -1516,9 +1520,9 @@ async function GenSub({ userID, host, userAgent, url, ADD, CF_PROXY_GENER, CVS, 
 		let old = accMap.get(uniqueAddr);
 		if (!(old && [...decodeURIComponent(old[0])].length >= [...decodeURIComponent(url_arr[2])].length)) {
 
-			// 没有 url_arr[3] 的配置默认链接 
+			// 没有 url_arr[3] 的配置默认链接，且绑定proxyip
 			let vess = url_arr[3] || `${atob(pt)}://${userID}${atob(at)}${url_arr[0]}:${url_arr[1]}?encryption=none\
-&type=ws${onlyTls ? "&security=tls" : ""}&host=${host}&path=${encodeURIComponent("/?ed=2560")}#${encodeURIComponent(url_arr[2])}`;
+&type=ws${onlyTls ? "&security=tls" : ""}&host=${host}&path=${encodeURIComponent("/?ed=2560&proxyip=" + proxyIP + ":" + proxyPort)}#${encodeURIComponent(url_arr[2])}`;
 			// 换成假数据
 			vess = !isSubReq ? vess : vess.replace(new RegExp(userID, 'gm'), fakeUserID).replace(new RegExp(host, 'gm'), randomDomain);
 
@@ -1541,7 +1545,7 @@ async function GenSub({ userID, host, userAgent, url, ADD, CF_PROXY_GENER, CVS, 
 	});
 }
 
-async function fetchConfig(fetching, resolve, outTime = 6000) {
+async function fetchConfig(fetching, needfetch = true, resolve = null, outTime = 6000) {
 
 	// 避免 api:// 的链接调用循环
 	let apiReference = new Set();
@@ -1551,6 +1555,9 @@ async function fetchConfig(fetching, resolve, outTime = 6000) {
 			if (str.charAt(0) === '#') return;
 
 			if (str.startsWith("api://")) {
+				if (!needfetch) {
+					return;
+				}
 				let furl = str.slice(6);
 				let converSplit = furl.split("://");
 				if (converSplit.length < 2) {
@@ -1614,7 +1621,7 @@ async function getReProxys(add, onlyTls) {
 	return parseAddrLinks(ips, onlyTls);
 }
 
-async function getReProxysFromCsv(cvs, isTls, DLS) {
+async function getReProxysFromCsv(cvs, onlyTls, DLS) {
 	if (!cvs || (cvs = cvs.trim()).length == 0) {
 		return [];
 	}
@@ -1684,7 +1691,7 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 			for (let i = 1; i < lines.length && maxrow > 0; i++) {
 				let columns = lines[i].split(',').map(txt => txt.trim());
 
-				if (isTls && columns[tlsColIndex].toLowerCase() !== "true") continue;
+				if (onlyTls && columns[tlsColIndex].toLowerCase() !== "true") continue;
 
 				// 在数据中获取速度单位
 				if (i == 1 && !speedUnits) {
@@ -1767,7 +1774,7 @@ async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDo
 		}
 	}
 
-	let ips = await fetchConfig(generStr.replaceAll(',', '\n'), fetch_sub);
+	let ips = await fetchConfig(generStr.replaceAll(',', '\n'), true, fetch_sub);
 
 	return parseAddrLinks(ips, onlyTls, true);
 }
