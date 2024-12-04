@@ -1,4 +1,4 @@
-// EDtunnel - A Cloudflare Worker-based VLESS Proxy with WebSocket Transport
+// EDtunnel - A Cloudflare Worker-based VESS Proxy with WebSocket Transport
 // @ts-ignore
 import { connect } from 'cloudflare:sockets';
 
@@ -9,7 +9,7 @@ import { connect } from 'cloudflare:sockets';
  * User configuration and settings
  * Generate UUID: [Windows] Press "Win + R", input cmd and run: Powershell -NoExit -Command "[guid]::NewGuid()"
  */
-let userID = 'ee1028d3-fd4e-4f27-94b3-fc456f322618';
+let userID = '';
 
 /**
  * Array of proxy server addresses with ports
@@ -38,12 +38,13 @@ let socks5Address = '';
  */
 let socks5Relay = false;
 
-if (!isValidUUID(userID)) {
-	throw new Error('uuid is not valid');
-}
-
 let parsedSocks5Address = {};
 let enableSocks = false;
+
+// 是否禁止非TLS
+let onlyTls = false;
+const HttpPort = new Set([80, 8080, 8880, 2052, 2086, 2095, 2082]);
+const HttpsPort = new Set([443, 8443, 2053, 2096, 2087, 2083]);
 
 /**
  * Main handler for the Cloudflare Worker. Processes incoming requests and routes them appropriately.
@@ -68,20 +69,18 @@ export default {
 			const host = request.headers.get('Host');
 			const userAgent = request.headers.get('User-Agent')?.toLowerCase() || '';
 			// @ts-ignore
-			const { UUID, PROXYIP, SOCKS5, SOCKS5_RELAY, IPs, CFProxyGener, CVS, DLS, SUBCONVER, SubConverMode } = env;
+			const { UUID, PROXYIP, SOCKS5, SOCKS5_RELAY, ADD, CF_PROXY_GENER, CVS, DLS, SUBCONVER, ACL4SSR_CONFIG, ONLYTLS = false } = env;
 
-			userID = UUID || userID;
+			userID = UUID?.replaceAll('\n', ',') || userID;
+			if (userID.split(',').some(uuid => !isValidUUID(uuid.trim()))) {
+				throw new Error('uuid is not valid');
+			}
+
 			socks5Address = SOCKS5 || socks5Address;
 			socks5Relay = SOCKS5_RELAY || socks5Relay;
 
-			let requestProxyip = url.searchParams.get("proxyip")?.trim() || PROXYIP.trim();
-			if (requestProxyip) {
-				// Split PROXYIP into an array of proxy addresses
-				const proxyAddresses = requestProxyip.split(/[,\n]/).map(addr => addr.trim());
-				// Randomly select one proxy address
-				const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
-				[proxyIP, proxyPort = '443'] = selectedProxy.split(':');
-			}
+			[proxyIP, proxyPort] = await processProxyip(url, PROXYIP, host);
+
 			console.log('ProxyIP:', proxyIP);
 			console.log('ProxyPort:', proxyPort);
 			if (socks5Address) {
@@ -98,7 +97,14 @@ export default {
 				}
 			}
 
-			const userID_Path = userID.split(/[,\n]/)[0];
+			if (ONLYTLS) {
+				onlyTls = ONLYTLS;
+			}
+			if (host.includes('pages.dev')) {
+				onlyTls = true;
+			}
+
+			const userID_Path = userID.split(',')[0];
 
 			if (request.headers.get('Upgrade') !== 'websocket') {
 				switch (url.pathname.toLowerCase().replace(/\/+$/, '')) {
@@ -121,64 +127,64 @@ export default {
 							userAgent,
 							proxyIP,
 							proxyPort,
-							IPs,
-							CFProxyGener,
+							ADD,
+							CF_PROXY_GENER,
 							CVS,
 							DLS,
 							SUBCONVER,
-							SubConverMode
+							ACL4SSR_CONFIG,
+							onlyTls
 						};
 						return GenSub(args);
 					// case `/bestip/${userID_Path}`:
-					// 	return fetch(`https://sub.xf.free.hr/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
+					// 	   return fetch(`https://sub.xf.free.hr/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
 					case '/':
 						// @ts-ignore
 						if (env.URL302) return Response.redirect(env.URL302, 302);
 					default:
-						return new Response(nginxHtml(), {
-							status: 200,
-							headers: { 'Content-Type': 'text/html; charset=UTF-8' },
-						});
-					//return handleDefaultPath(url, request);
+						// 伪装页面
+						return handleDefaultPath(url, request);
 				}
 			} else {
 				return await ProtocolOverWSHandler(request);
 			}
 		} catch (err) {
-			return new Response(err.toString());
+			return new Response(err.toString(), {
+				status: 500
+			});
 		}
 	},
 };
 
-function nginxHtml() {
-	const text = `
-	<!DOCTYPE html>
-	<html>
-	<head>
-	<title>Welcome to nginx!</title>
-	<style>
-		body {
-			width: 35em;
-			margin: 0 auto;
-			font-family: Tahoma, Verdana, Arial, sans-serif;
-		}
-	</style>
-	</head>
-	<body>
-	<h1>Welcome to nginx!</h1>
-	<p>If you see this page, the nginx web server is successfully installed and
-	working. Further configuration is required.</p>
-	
-	<p>For online documentation and support please refer to
-	<a href="http://nginx.org/">nginx.org</a>.<br/>
-	Commercial support is available at
-	<a href="http://nginx.com/">nginx.com</a>.</p>
-	
-	<p><em>Thank you for using nginx.</em></p>
-	</body>
-	</html>
-	`
-	return text;
+/**
+ * 处理 ProxyIP
+ *
+ * @param {*} url
+ * @param {*} PROXYIP
+ * @param {*} host
+ */
+async function processProxyip(url, PROXYIP, host) {
+
+	let proxyIP, proxyPort;
+	let requestProxyip = url.searchParams.get("proxyip") || url.searchParams.get("pyip");
+	if (requestProxyip) {
+		// Split PROXYIP into an array of proxy addresses
+		const proxyAddresses = requestProxyip.split(',').map(addr => addr.trim()).filter(Boolean);
+		// Randomly select one proxy address
+		const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
+		[proxyIP, proxyPort = '443'] = selectedProxy.split(':');
+	}
+	else if (PROXYIP) {
+		const proxyAddresses = await fetchConfig(PROXYIP.trim().replaceAll(',', '\n'));
+		const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
+		[proxyIP, proxyPort = '443'] = selectedProxy.split(':');
+	}
+	else {
+		proxyIP = host;
+		proxyPort = '443';
+	}
+
+	return [proxyIP, proxyPort];
 }
 
 /**
@@ -188,253 +194,253 @@ function nginxHtml() {
  * @param {Request} request - The incoming request object
  * @returns {Response} HTML response with cloud drive interface
  */
-// async function handleDefaultPath(url, request) {
-// 	const host = request.headers.get('Host');
-// 	const DrivePage = `
-// 	  <!DOCTYPE html>
-// 	  <html lang="en">
-// 	  <head>
-// 		  <meta charset="UTF-8">
-// 		  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-// 		  <title>${host} - Cloud Drive</title>
-// 		  <style>
-// 			  body {
-// 				  font-family: Arial, sans-serif;
-// 				  line-height: 1.6;
-// 				  margin: 0;
-// 				  padding: 20px;
-// 				  background-color: #f4f4f4;
-// 			  }
-// 			  .container {
-// 				  max-width: 800px;
-// 				  margin: auto;
-// 				  background: white;
-// 				  padding: 20px;
-// 				  border-radius: 5px;
-// 				  box-shadow: 0 0 10px rgba(0,0,0,0.1);
-// 			  }
-// 			  h1 {
-// 				  color: #333;
-// 			  }
-// 			  .file-list {
-// 				  list-style-type: none;
-// 				  padding: 0;
-// 			  }
-// 			  .file-list li {
-// 				  background: #f9f9f9;
-// 				  margin-bottom: 10px;
-// 				  padding: 10px;
-// 				  border-radius: 3px;
-// 				  display: flex;
-// 				  align-items: center;
-// 			  }
-// 			  .file-list li:hover {
-// 				  background: #f0f0f0;
-// 			  }
-// 			  .file-icon {
-// 				  margin-right: 10px;
-// 				  font-size: 1.2em;
-// 			  }
-// 			  .file-link {
-// 				  text-decoration: none;
-// 				  color: #0066cc;
-// 				  flex-grow: 1;
-// 			  }
-// 			  .file-link:hover {
-// 				  text-decoration: underline;
-// 			  }
-// 			  .upload-area {
-// 				  margin-top: 20px;
-// 				  padding: 40px;
-// 				  background: #e9e9e9;
-// 				  border: 2px dashed #aaa;
-// 				  border-radius: 5px;
-// 				  text-align: center;
-// 				  cursor: pointer;
-// 				  transition: all 0.3s ease;
-// 			  }
-// 			  .upload-area:hover, .upload-area.drag-over {
-// 				  background: #d9d9d9;
-// 				  border-color: #666;
-// 			  }
-// 			  .upload-area h2 {
-// 				  margin-top: 0;
-// 				  color: #333;
-// 			  }
-// 			  #fileInput {
-// 				  display: none;
-// 			  }
-// 			  .upload-icon {
-// 				  font-size: 48px;
-// 				  color: #666;
-// 				  margin-bottom: 10px;
-// 			  }
-// 			  .upload-text {
-// 				  font-size: 18px;
-// 				  color: #666;
-// 			  }
-// 			  .upload-status {
-// 				  margin-top: 20px;
-// 				  font-style: italic;
-// 				  color: #666;
-// 			  }
-// 			  .file-actions {
-// 				  display: flex;
-// 				  gap: 10px;
-// 			  }
-// 			  .delete-btn {
-// 				  color: #ff4444;
-// 				  cursor: pointer;
-// 				  background: none;
-// 				  border: none;
-// 				  padding: 5px;
-// 			  }
-// 			  .delete-btn:hover {
-// 				  color: #ff0000;
-// 			  }
-// 			  .clear-all-btn {
-// 				  background-color: #ff4444;
-// 				  color: white;
-// 				  border: none;
-// 				  padding: 10px 15px;
-// 				  border-radius: 4px;
-// 				  cursor: pointer;
-// 				  margin-bottom: 20px;
-// 			  }
-// 			  .clear-all-btn:hover {
-// 				  background-color: #ff0000;
-// 			  }
-// 		  </style>
-// 	  </head>
-// 	  <body>
-// 		  <div class="container">
-// 			  <h1>Cloud Drive</h1>
-// 			  <p>Welcome to your personal cloud storage. Here are your uploaded files:</p>
-// 			  <button id="clearAllBtn" class="clear-all-btn">Clear All Files</button>
-// 			  <ul id="fileList" class="file-list">
-// 			  </ul>
-// 			  <div id="uploadArea" class="upload-area">
-// 				  <div class="upload-icon">📁</div>
-// 				  <h2>Upload a File</h2>
-// 				  <p class="upload-text">Drag and drop a file here or click to select</p>
-// 				  <input type="file" id="fileInput" hidden>
-// 			  </div>
-// 			  <div id="uploadStatus" class="upload-status"></div>
-// 		  </div>
-// 		  <script>
-// 			  function loadFileList() {
-// 				  const fileList = document.getElementById('fileList');
-// 				  const savedFiles = JSON.parse(localStorage.getItem('uploadedFiles')) || [];
-// 				  fileList.innerHTML = '';
-// 				  savedFiles.forEach((file, index) => {
-// 					  const li = document.createElement('li');
-// 					  li.innerHTML = \`
-// 						  <span class="file-icon">📄</span>
-// 						  <a href="https://ipfs.io/ipfs/\${file.Url.split('/').pop()}" class="file-link" target="_blank">\${file.Name}</a>
-// 						  <div class="file-actions">
-// 							  <button class="delete-btn" onclick="deleteFile(\${index})">
-// 								  <span class="file-icon">❌</span>
-// 							  </button>
-// 						  </div>
-// 					  \`;
-// 					  fileList.appendChild(li);
-// 				  });
-// 			  }
+function handleDefaultPath(url, request) {
+	const host = request.headers.get('Host');
+	const DrivePage = `
+	  <!DOCTYPE html>
+	  <html lang="en">
+	  <head>
+		  <meta charset="UTF-8">
+		  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+		  <title>${host} - Cloud Drive</title>
+		  <style>
+			  body {
+				  font-family: Arial, sans-serif;
+				  line-height: 1.6;
+				  margin: 0;
+				  padding: 20px;
+				  background-color: #f4f4f4;
+			  }
+			  .container {
+				  max-width: 800px;
+				  margin: auto;
+				  background: white;
+				  padding: 20px;
+				  border-radius: 5px;
+				  box-shadow: 0 0 10px rgba(0,0,0,0.1);
+			  }
+			  h1 {
+				  color: #333;
+			  }
+			  .file-list {
+				  list-style-type: none;
+				  padding: 0;
+			  }
+			  .file-list li {
+				  background: #f9f9f9;
+				  margin-bottom: 10px;
+				  padding: 10px;
+				  border-radius: 3px;
+				  display: flex;
+				  align-items: center;
+			  }
+			  .file-list li:hover {
+				  background: #f0f0f0;
+			  }
+			  .file-icon {
+				  margin-right: 10px;
+				  font-size: 1.2em;
+			  }
+			  .file-link {
+				  text-decoration: none;
+				  color: #0066cc;
+				  flex-grow: 1;
+			  }
+			  .file-link:hover {
+				  text-decoration: underline;
+			  }
+			  .upload-area {
+				  margin-top: 20px;
+				  padding: 40px;
+				  background: #e9e9e9;
+				  border: 2px dashed #aaa;
+				  border-radius: 5px;
+				  text-align: center;
+				  cursor: pointer;
+				  transition: all 0.3s ease;
+			  }
+			  .upload-area:hover, .upload-area.drag-over {
+				  background: #d9d9d9;
+				  border-color: #666;
+			  }
+			  .upload-area h2 {
+				  margin-top: 0;
+				  color: #333;
+			  }
+			  #fileInput {
+				  display: none;
+			  }
+			  .upload-icon {
+				  font-size: 48px;
+				  color: #666;
+				  margin-bottom: 10px;
+			  }
+			  .upload-text {
+				  font-size: 18px;
+				  color: #666;
+			  }
+			  .upload-status {
+				  margin-top: 20px;
+				  font-style: italic;
+				  color: #666;
+			  }
+			  .file-actions {
+				  display: flex;
+				  gap: 10px;
+			  }
+			  .delete-btn {
+				  color: #ff4444;
+				  cursor: pointer;
+				  background: none;
+				  border: none;
+				  padding: 5px;
+			  }
+			  .delete-btn:hover {
+				  color: #ff0000;
+			  }
+			  .clear-all-btn {
+				  background-color: #ff4444;
+				  color: white;
+				  border: none;
+				  padding: 10px 15px;
+				  border-radius: 4px;
+				  cursor: pointer;
+				  margin-bottom: 20px;
+			  }
+			  .clear-all-btn:hover {
+				  background-color: #ff0000;
+			  }
+		  </style>
+	  </head>
+	  <body>
+		  <div class="container">
+			  <h1>Cloud Drive</h1>
+			  <p>Welcome to your personal cloud storage. Here are your uploaded files:</p>
+			  <button id="clearAllBtn" class="clear-all-btn">Clear All Files</button>
+			  <ul id="fileList" class="file-list">
+			  </ul>
+			  <div id="uploadArea" class="upload-area">
+				  <div class="upload-icon">📁</div>
+				  <h2>Upload a File</h2>
+				  <p class="upload-text">Drag and drop a file here or click to select</p>
+				  <input type="file" id="fileInput" hidden>
+			  </div>
+			  <div id="uploadStatus" class="upload-status"></div>
+		  </div>
+		  <script>
+			  function loadFileList() {
+				  const fileList = document.getElementById('fileList');
+				  const savedFiles = JSON.parse(localStorage.getItem('uploadedFiles')) || [];
+				  fileList.innerHTML = '';
+				  savedFiles.forEach((file, index) => {
+					  const li = document.createElement('li');
+					  li.innerHTML = \`
+						  <span class="file-icon">📄</span>
+						  <a href="https://ipfs.io/ipfs/\${file.Url.split('/').pop()}" class="file-link" target="_blank">\${file.Name}</a>
+						  <div class="file-actions">
+							  <button class="delete-btn" onclick="deleteFile(\${index})">
+								  <span class="file-icon">❌</span>
+							  </button>
+						  </div>
+					  \`;
+					  fileList.appendChild(li);
+				  });
+			  }
 
-// 			  function deleteFile(index) {
-// 				  const savedFiles = JSON.parse(localStorage.getItem('uploadedFiles')) || [];
-// 				  savedFiles.splice(index, 1);
-// 				  localStorage.setItem('uploadedFiles', JSON.stringify(savedFiles));
-// 				  loadFileList();
-// 			  }
+			  function deleteFile(index) {
+				  const savedFiles = JSON.parse(localStorage.getItem('uploadedFiles')) || [];
+				  savedFiles.splice(index, 1);
+				  localStorage.setItem('uploadedFiles', JSON.stringify(savedFiles));
+				  loadFileList();
+			  }
 
-// 			  document.getElementById('clearAllBtn').addEventListener('click', () => {
-// 				  if (confirm('Are you sure you want to clear all files?')) {
-// 					  localStorage.removeItem('uploadedFiles');
-// 					  loadFileList();
-// 				  }
-// 			  });
+			  document.getElementById('clearAllBtn').addEventListener('click', () => {
+				  if (confirm('Are you sure you want to clear all files?')) {
+					  localStorage.removeItem('uploadedFiles');
+					  loadFileList();
+				  }
+			  });
 
-// 			  loadFileList();
+			  loadFileList();
 
-// 			  const uploadArea = document.getElementById('uploadArea');
-// 			  const fileInput = document.getElementById('fileInput');
-// 			  const uploadStatus = document.getElementById('uploadStatus');
+			  const uploadArea = document.getElementById('uploadArea');
+			  const fileInput = document.getElementById('fileInput');
+			  const uploadStatus = document.getElementById('uploadStatus');
 
-// 			  uploadArea.addEventListener('dragover', (e) => {
-// 				  e.preventDefault();
-// 				  uploadArea.classList.add('drag-over');
-// 			  });
+			  uploadArea.addEventListener('dragover', (e) => {
+				  e.preventDefault();
+				  uploadArea.classList.add('drag-over');
+			  });
 
-// 			  uploadArea.addEventListener('dragleave', () => {
-// 				  uploadArea.classList.remove('drag-over');
-// 			  });
+			  uploadArea.addEventListener('dragleave', () => {
+				  uploadArea.classList.remove('drag-over');
+			  });
 
-// 			  uploadArea.addEventListener('drop', (e) => {
-// 				  e.preventDefault();
-// 				  uploadArea.classList.remove('drag-over');
-// 				  const files = e.dataTransfer.files;
-// 				  if (files.length) {
-// 					  handleFileUpload(files[0]);
-// 				  }
-// 			  });
+			  uploadArea.addEventListener('drop', (e) => {
+				  e.preventDefault();
+				  uploadArea.classList.remove('drag-over');
+				  const files = e.dataTransfer.files;
+				  if (files.length) {
+					  handleFileUpload(files[0]);
+				  }
+			  });
 
-// 			  uploadArea.addEventListener('click', () => {
-// 				  fileInput.click();
-// 			  });
+			  uploadArea.addEventListener('click', () => {
+				  fileInput.click();
+			  });
 
-// 			  fileInput.addEventListener('change', (e) => {
-// 				  const file = e.target.files[0];
-// 				  if (file) {
-// 					  handleFileUpload(file);
-// 				  }
-// 			  });
+			  fileInput.addEventListener('change', (e) => {
+				  const file = e.target.files[0];
+				  if (file) {
+					  handleFileUpload(file);
+				  }
+			  });
 
-// 			  async function handleFileUpload(file) {
-// 				  uploadStatus.textContent = \`Uploading: \${file.name}...\`;
+			  async function handleFileUpload(file) {
+				  uploadStatus.textContent = \`Uploading: \${file.name}...\`;
 
-// 				  const formData = new FormData();
-// 				  formData.append('file', file);
+				  const formData = new FormData();
+				  formData.append('file', file);
 
-// 				  try {
-// 					  const response = await fetch('https://app.img2ipfs.org/api/v0/add', {
-// 						  method: 'POST',
-// 						  body: formData,
-// 						  headers: {
-// 							  'Accept': 'application/json',
-// 						  },
-// 					  });
+				  try {
+					  const response = await fetch('https://app.img2ipfs.org/api/v0/add', {
+						  method: 'POST',
+						  body: formData,
+						  headers: {
+							  'Accept': 'application/json',
+						  },
+					  });
 
-// 					  if (!response.ok) {
-// 						  throw new Error('Upload failed');
-// 					  }
+					  if (!response.ok) {
+						  throw new Error('Upload failed');
+					  }
 
-// 					  const result = await response.json();
-// 					  uploadStatus.textContent = \`File uploaded successfully! IPFS Hash: \${result.Hash}\`;
+					  const result = await response.json();
+					  uploadStatus.textContent = \`File uploaded successfully! IPFS Hash: \${result.Hash}\`;
 
-// 					  const savedFiles = JSON.parse(localStorage.getItem('uploadedFiles')) || [];
-// 					  savedFiles.push(result);
-// 					  localStorage.setItem('uploadedFiles', JSON.stringify(savedFiles));
+					  const savedFiles = JSON.parse(localStorage.getItem('uploadedFiles')) || [];
+					  savedFiles.push(result);
+					  localStorage.setItem('uploadedFiles', JSON.stringify(savedFiles));
 
-// 					  loadFileList();
+					  loadFileList();
 
-// 				  } catch (error) {
-// 					  console.error('Error:', error);
-// 					  uploadStatus.textContent = 'Upload failed. Please try again.';
-// 				  }
-// 			  }
-// 		  </script>
-// 	  </body>
-// 	  </html>
-// 	`;
+				  } catch (error) {
+					  console.error('Error:', error);
+					  uploadStatus.textContent = 'Upload failed. Please try again.';
+				  }
+			  }
+		  </script>
+	  </body>
+	  </html>
+	`;
 
-// 	// 返回伪装的网盘页面
-// 	return new Response(DrivePage, {
-// 		headers: {
-// 			"content-type": "text/html;charset=UTF-8",
-// 		},
-// 	});
-// }
+	// 返回伪装的网盘页面
+	return new Response(DrivePage, {
+		headers: {
+			"content-type": "text/html;charset=UTF-8",
+		},
+	});
+}
 
 /**
  * Handles protocol over WebSocket requests by creating a WebSocket pair, accepting the WebSocket connection, and processing the protocol header.
@@ -640,7 +646,7 @@ function MakeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
 }
 
 /**
- * Processes VLESS protocol header.
+ * Processes VESS protocol header.
  * Extracts and validates protocol information from buffer.
  * @param {ArrayBuffer} protocolBuffer - Buffer containing protocol header
  * @param {string} userID - User ID for validation
@@ -877,7 +883,7 @@ async function handleDNSQuery(udpChunk, webSocket, protocolResponseHeader, log) 
 		const dnsServer = '8.8.4.4'; // change to 1.1.1.1 after cf fix connect own ip bug
 		const dnsPort = 53;
 		/** @type {ArrayBuffer | null} */
-		let vlessHeader = protocolResponseHeader;
+		let vessHeader = protocolResponseHeader;
 		/** @type {import("@cloudflare/workers-types").Socket} */
 		const tcpSocket = connect({
 			hostname: dnsServer,
@@ -891,9 +897,9 @@ async function handleDNSQuery(udpChunk, webSocket, protocolResponseHeader, log) 
 		await tcpSocket.readable.pipeTo(new WritableStream({
 			async write(chunk) {
 				if (webSocket.readyState === WS_READY_STATE_OPEN) {
-					if (vlessHeader) {
-						webSocket.send(await new Blob([vlessHeader, chunk]).arrayBuffer());
-						vlessHeader = null;
+					if (vessHeader) {
+						webSocket.send(await new Blob([vessHeader, chunk]).arrayBuffer());
+						vessHeader = null;
 					} else {
 						webSocket.send(chunk);
 					}
@@ -1088,24 +1094,25 @@ function socks5AddressParser(address) {
 
 const at = 'QA==';
 const pt = 'dmxlc3M=';
-// @ts-ignore
-const ed = 'RUR0dW5uZWw='; //E-D-tunnel
+// const ed = 'RUR0dW5uZWw='; //E-D-tunnel
 
 /**
- * Generates configuration for VLESS client.
+ * Generates configuration for VESS client.
  * @param {string} userIDs - Single or comma-separated user IDs
  * @param {string} hostName - Host name for configuration
  * @returns {string} Configuration HTML
  */
 function getConfig(userIDs, hostName) {
-	const commonUrlPart = `?encryption=none&security=tls&sni=${hostName}&fp=randomized&type=ws&host=${hostName}&path=%2F%3Fed%3D2560#${hostName}`;
+	const randomPath = () => '/' + Math.random().toString(36).substring(2, 15) + '?ed=2560';
+	const commonUrlPartHttp = `?encryption=none&security=none&fp=randomized&type=ws&host=${hostName}&path=${encodeURIComponent(randomPath())}#`;
+	const commonUrlPartHttps = `?encryption=none&security=tls&sni=${hostName}&fp=randomized&type=ws&host=${hostName}&path=%2F%3Fed%3D2560#`;
 
 	// Split the userIDs into an array
-	const userIDArray = userIDs.split(/[,\n]/);
+	const userIDArray = userIDs.split(',');
 
 	// Prepare output string for each userID
 	const sublink = `https://${hostName}/${userIDArray[0]}/sub`;
-	const subbestip = `https://${hostName}/bestip/${userIDArray[0]}`;
+	// const subbestip = `https://${hostName}/bestip/${userIDArray[0]}`;
 	// HTML Head with CSS and FontAwesome library
 	const htmlHead = `
   <head>
@@ -1231,7 +1238,7 @@ function getConfig(userIDs, hostName) {
 
 	const header = `
     <div class="container">
-      <h1>EDtunnel: Protocol Configuration</h1>
+      <h1>订阅配置（优选）</h1>
       <p>Welcome! This function generates configuration for the vless protocol. If you found this useful, please check our GitHub project:</p>
       <p><a href="https://github.com/Icemans007/EDtunnel" target="_blank" style="color: #00ff00;">EDtunnel - https://github.com/Icemans007/EDtunnel</a></p>
       <div style="clear: both;"></div>
@@ -1254,12 +1261,20 @@ function getConfig(userIDs, hostName) {
     </div>
   `;
 
-	const configOutput = userIDArray.map((userID) => {
-		const v2ray = `${atob(pt)}://${userID}${atob(at)}${hostName}:443${commonUrlPart}`;
-		const clash = `- type: ${atob(pt)}
-  name: ${hostName}
+	const configOutput = userIDArray.flatMap((userID) => {
+		let vessPart = [];
+		let clashPart = [];
+
+		vessPart = vessPart.concat(Array.from(HttpsPort).map(port => {
+			const urlPart = `${hostName}-HTTPS-${port}`;
+			return atob(pt) + '://' + userID + atob(at) + hostName + ':' + port + commonUrlPartHttps + urlPart;
+		}));
+
+		clashPart = clashPart.concat(Array.from(HttpsPort).map(port => {
+			return `- type: ${atob(pt)}
+  name: ${hostName}-HTTPS-${port}
   server: ${hostName}
-  port: 443
+  port: ${port}
   uuid: ${userID}
   network: ws
   tls: true
@@ -1270,22 +1285,52 @@ function getConfig(userIDs, hostName) {
   path: "/?ed=2560"
   headers:
     host: ${hostName}`;
+		}));
+
+		if (!onlyTls) {
+			vessPart = vessPart.concat(Array.from(HttpPort).map(port => {
+				const urlPart = `${hostName}-HTTP-${port}`;
+				return atob(pt) + '://' + userID + atob(at) + hostName + ':' + port + commonUrlPartHttp + urlPart;
+			}));
+
+			clashPart = clashPart.concat(Array.from(HttpPort).map(port => {
+				return `- type: ${atob(pt)}
+  name: ${hostName}-HTTP-${port}
+  server: ${hostName}
+  port: ${port}
+  uuid: ${userID}
+  network: ws
+  tls: none
+  udp: true
+  sni: ${hostName}
+  client-fingerprint: randomized
+  ws-opts:
+  path: "/?ed=2560"
+  headers:
+    host: ${hostName}`;
+			}));
+		}
+
+		let codehtml = function (partType) {
+			let html = '';
+			for (let code of partType) {
+				html += `<div class="code-container">
+					<pre><code>${code}</code></pre>
+					<button class="btn copy-btn" onclick='copyToClipboard("${code}")'><i class="fas fa-copy"></i> 复制</button>
+				</div>`;
+			}
+			return html;
+		};
 
 		return `
       <div class="container config-item">
-	  	<h2>配置信息</h2>
+	  	<h2>代理配置</h2>
         <h4>UUID: ${userID}</h2>
         <h4>PROXYIP: ${proxyIP}:${proxyPort}</h2>
         <h3>clash 配置</h3>
-        <div class="code-container">
-          <pre><code>${clash}</code></pre>
-          <button class="btn copy-btn" onclick='copyToClipboard("${clash}")'><i class="fas fa-copy"></i> 复制</button>
-        </div>
+          ${codehtml(clashPart)}
         <h3>vless 配置</h3>
-        <div class="code-container">
-          <pre><code>${v2ray}</code></pre>
-          <button class="btn copy-btn" onclick='copyToClipboard("${v2ray}")'><i class="fas fa-copy"></i> 复制</button>
-        </div>
+		  ${codehtml(vessPart)}
       </div>
     `;
 	}).join('');
@@ -1316,14 +1361,12 @@ function getConfig(userIDs, hostName) {
  * @returns {Promise<Response>} Subscription content
  */
 // @ts-ignore
-async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DLS, SUBCONVER, SubConverMode } = {}) {
+async function GenSub({ userID, host, userAgent, url, ADD, CF_PROXY_GENER, CVS, DLS, SUBCONVER, ACL4SSR_CONFIG, onlyTls } = {}) {
 
 	// 订阅链接转换 clash/sing-box 的服务器后端地址
 	let subconverter = SUBCONVER;
 	// 订阅转换配置文件
-	let subConverterMode = SubConverMode || "https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/refs/heads/master/Clash/config/ACL4SSR_Online.ini";
-	// 是否禁止非TLS
-	let onlyTls = true;
+	let subConverterMode = ACL4SSR_CONFIG || "https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/refs/heads/master/Clash/config/ACL4SSR_Online.ini";
 
 	let fakeUserID = generateRandomUUID();
 	let randomDomain = generateRandomStr(12) + [".net", ".com", ".org", ".edu", ".cn", ".jp", ".xyz", ".us"].at(Math.random() * 8 | 0);
@@ -1402,7 +1445,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	if (isSubReq) {
 		// 校验第三方后端订阅转换服务请求合法
 		if (!url.searchParams.has('token') || !isBase64(url.searchParams.get('token'))) {
-			return new Response(new Error("Illegal Requests"), {
+			return new Response(new Error("Illegal Requests").message, {
 				status: 403,
 				headers: {
 					'Content-Type': 'text/html;charset=UTF-8',
@@ -1412,7 +1455,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 
 		let token = atob(url.searchParams.get('token')).split('@');
 		if (token.length !== 2) {
-			return new Response(new Error("Illegal Requests"), {
+			return new Response(new Error("Illegal Requests").message, {
 				status: 403,
 				headers: {
 					'Content-Type': 'text/html;charset=UTF-8',
@@ -1426,10 +1469,10 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	let addresses = [];
 	// CF IP列表
 	if (url.searchParams.has("cfproxylist")) {
-		IPs = url.searchParams.get("cfproxylist")?.trim().split(",").map(list => "api://" + list).join(',');
+		ADD = url.searchParams.get("cfproxylist")?.trim().split(",").map(list => "api://" + list).join(',');
 	}
-	if (IPs) {
-		let res = await getReProxys(IPs);
+	if (ADD) {
+		let res = await getReProxys(ADD, onlyTls);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
@@ -1448,17 +1491,17 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 
 	// CF优选生成器
 	if (url.searchParams.has("cfproxygener")) {
-		CFProxyGener = url.searchParams.get("cfproxygener");
+		CF_PROXY_GENER = url.searchParams.get("cfproxygener");
 	}
-	if (CFProxyGener) {
-		let res = await getReProxysFromGener(CFProxyGener, userID, host, fakeUserID, randomDomain, onlyTls);
+	if (CF_PROXY_GENER) {
+		let res = await getReProxysFromGener(CF_PROXY_GENER, userID, host, fakeUserID, randomDomain, onlyTls);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
 	}
 
 	let partTag = "";
-	if (!isSubReq && (host.endsWith('.workers.dev') || host.endsWith('.pages.dev'))) {
+	if (!isSubReq && (host.includes('.workers.dev') || host.includes('.pages.dev'))) {
 		partTag += encodeURIComponent("--请绑定自定义域!");
 	}
 	// 如果是isSubReq，需要设置替换为假信息， 根据 address:port 去重， tag相同+1递增
@@ -1475,7 +1518,7 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 
 			// 没有 url_arr[3] 的配置默认链接 
 			let vess = url_arr[3] || `${atob(pt)}://${userID}${atob(at)}${url_arr[0]}:${url_arr[1]}?encryption=none\
-&security=${onlyTls ? "tls" : ""}&type=ws&host=${host}&path=${encodeURIComponent("/?ed=2560")}#${encodeURIComponent(url_arr[2])}`;
+&type=ws${onlyTls ? "&security=tls" : ""}&host=${host}&path=${encodeURIComponent("/?ed=2560")}#${encodeURIComponent(url_arr[2])}`;
 			// 换成假数据
 			vess = !isSubReq ? vess : vess.replace(new RegExp(userID, 'gm'), fakeUserID).replace(new RegExp(host, 'gm'), randomDomain);
 
@@ -1498,20 +1541,15 @@ async function GenSub({ userID, host, userAgent, url, IPs, CFProxyGener, CVS, DL
 	});
 }
 
-/**
- * 
- * @param {*} add 
- * @returns 
- */
-async function getReProxys(add) {
-	if (!add || (add = add.trim()).length == 0) {
-		return [];
-	}
+async function fetchConfig(fetching, resolve, outTime = 6000) {
+
 	// 避免 api:// 的链接调用循环
 	let apiReference = new Set();
-	let inner = async function (add) {
-		return (await Promise.all(add.split('\n').map(v => v.trim()).map(async str => {
+	let inner = async function (fetching) {
+		return (await Promise.all(fetching.split('\n').map(v => v.trim()).map(async str => {
+			// 前面是# 号的是忽略的配置
 			if (str.charAt(0) === '#') return;
+
 			if (str.startsWith("api://")) {
 				let furl = str.slice(6);
 				let converSplit = furl.split("://");
@@ -1525,8 +1563,8 @@ async function getReProxys(add) {
 
 				try {
 					const controller = new AbortController();
-					const id = setTimeout(() => controller.abort(), 5000);
-					let resp = await fetch(furl, {
+					const id = setTimeout(() => controller.abort(), outTime);
+					const resp = await fetch(furl, {
 						method: 'get',
 						headers: {
 							'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
@@ -1538,7 +1576,6 @@ async function getReProxys(add) {
 					}).catch(error => {
 						if (error.name === 'AbortError') {
 							console.warn('请求超时: ' + furl, error);
-							return;
 						}
 						throw error;
 					});
@@ -1554,14 +1591,27 @@ async function getReProxys(add) {
 					return; // 如果有错误，直接返回
 				}
 			}
-
-			return str;
+			// 不是 api:// 开头看是否需要进一步处理
+			return typeof resolve === 'function' ? resolve(str) : str;
 		}))).flat().filter(Boolean).map(ip => ip.trim());
 	}
 
-	let ips = await inner(add.replace(',', '\n'));
+	return inner(fetching);
+}
 
-	return parseAddrLinks(ips);
+/**
+ * 
+ * @param {*} add 
+ * @returns 
+ */
+async function getReProxys(add, onlyTls) {
+	if (!add || (add = add.trim()).length == 0) {
+		return [];
+	}
+
+	let ips = await fetchConfig(add.replaceAll(',', '\n'));
+
+	return parseAddrLinks(ips, onlyTls);
 }
 
 async function getReProxysFromCsv(cvs, isTls, DLS) {
@@ -1614,7 +1664,7 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 			countryColIndex = countryColIndex !== -1 ? countryColIndex : header.indexOf('country');
 			let cityColIndex = header.indexOf('城市');
 			cityColIndex = cityColIndex !== -1 ? cityColIndex : header.indexOf('city');
-			let speedColIndex = header.findLastIndex(item => item.includes("速度") || item.includes("speed"));
+			let speedColIndex = header.findIndex(item => item.includes("速度") || item.includes("speed"));
 			// 速度一般是最后一个字段
 			if (speedColIndex === -1) {
 				speedColIndex = header.length - 1;
@@ -1633,6 +1683,9 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 			// 从第二行开始遍历CSV行
 			for (let i = 1; i < lines.length && maxrow > 0; i++) {
 				let columns = lines[i].split(',').map(txt => txt.trim());
+
+				if (isTls && columns[tlsColIndex].toLowerCase() !== "true") continue;
+
 				// 在数据中获取速度单位
 				if (i == 1 && !speedUnits) {
 					if (columns[speedColIndex]?.toLowerCase().includes('kb')) {
@@ -1641,8 +1694,6 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 						speedUnits = "MB";
 					}
 				}
-
-				if (isTls && columns[tlsColIndex].toLowerCase() !== "true") continue;
 				// 检查速度大于DLS(DLS 是MB)
 				let dataSpeed = parseFloat(columns[speedColIndex]);
 				if (DLS > 0 && !isNaN(dataSpeed)) {
@@ -1673,117 +1724,92 @@ async function getReProxysFromCsv(cvs, isTls, DLS) {
 }
 
 // @ts-ignore
-async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDomain, onlyTls) {
+async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDomain, onlyTls = true) {
 	if (!generStr || (generStr = generStr.trim()).length == 0) {
 		return [];
 	}
 
-	let apiReference = new Set();
 	let generNum = new Set();
+	let fetch_sub = async function (sub) {
+		// 订阅器地址
+		let converSplit = sub.split("://");
+		if (converSplit.length < 2) {
+			sub = "https://" + converSplit[0];
+		}
+		// 一个Gener 生成的订阅地址够大，所以只允许3个
+		if (generNum.has(sub) || generNum.size >= 3) {
+			return;
+		}
+		generNum.add(sub);
 
-	let inner = async function (generStr) {
-		return (await Promise.all(generStr.split('\n').map(v => v.trim()).map(async sub => {
-			if (sub.charAt(0) === '#') return;
-			// 获取订阅的url
-			if (sub.startsWith("api://")) {
-				let furl = sub.slice(6);
-				let converSplit = furl.split("://");
-				if (converSplit.length < 2) {
-					furl = "https://" + converSplit[0];
+		let url = `${sub}/sub?host=${randomDomain}&uuid=${fakeUserID}&type=ws&path=${encodeURIComponent("/?ed=2560")}`;
+		try {
+			let resp = await fetch(url, {
+				method: 'get',
+				headers: {
+					'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
+					'User-Agent': 'v2ray.xray'
 				}
-				// 解除循环链接引用
-				if (apiReference.has(furl)) {
-					return;
-				}
-				apiReference.add(furl);
-				try {
-					let resp = await fetch(furl, {
-						method: 'get',
-						headers: {
-							'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
-							'User-Agent': 'Mozilla/5.0 Chrome/131.0.0.0'
-						}
-					});
-					if (!resp.ok) {
-						console.warn('获取地址时出错: ' + furl, resp.status, resp.statusText);
-						return; // 如果有错误，直接返回
-					}
-
-					return inner(await resp.text());
-				} catch (err) {
-					console.error('获取地址时出错: ' + sub, err);
-					return; // 如果有错误，直接返回
-				}
-			}
-
-			// 订阅器地址
-			let converSplit = sub.split("://");
-			if (converSplit.length < 2) {
-				sub = "https://" + converSplit[0];
-			}
-			// 一个Gener 生成的订阅地址够大，所以只允许3个
-			if (generNum.has(sub) || generNum.size >= 3) {
-				return;
-			}
-			generNum.add(sub);
-
-			let url = `${sub}/sub?host=${randomDomain}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2560")}`;
-			try {
-				let resp = await fetch(url, {
-					method: 'get',
-					headers: {
-						'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
-						'User-Agent': 'v2ray.xray'
-					}
-				});
-				if (!resp.ok) {
-					console.warn('获取ProxyGener地址时出错: ' + url, resp.status, resp.statusText);
-					return; // 如果有错误，直接返回
-				}
-				// 可能是base64编码串
-				let encodeStr = await resp.text();
-				// 将假数据还原
-				encodeStr = (isBase64(encodeStr) ? atob(encodeStr) : encodeStr).replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(randomDomain, 'gm'), host);
-
-				return encodeStr.split('\n');
-			} catch (err) {
-				console.error('解析ProxyGener地址时出错: ' + url, err);
+			});
+			if (!resp.ok) {
+				console.warn('获取ProxyGener地址时出错: ' + url, resp.status, resp.statusText);
 				return; // 如果有错误，直接返回
 			}
-		}))).flat().filter(Boolean).map(ip => ip.trim());
+			// 可能是base64编码串
+			let encodeStr = await resp.text();
+			// 将假数据还原
+			encodeStr = (isBase64(encodeStr) ? atob(encodeStr) : encodeStr).replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(randomDomain, 'gm'), host);
+
+			return encodeStr.split('\n');
+		} catch (err) {
+			console.error('解析ProxyGener地址时出错: ' + url, err);
+			return; // 如果有错误，直接返回
+		}
 	}
 
-	let ips = await inner(generStr.replace(',', '\n'));
+	let ips = await fetchConfig(generStr.replaceAll(',', '\n'), fetch_sub);
 
-	return parseAddrLinks(ips, true);
+	return parseAddrLinks(ips, onlyTls, true);
 }
 
-function parseAddrLinks(ips, isVess = false) {
+function parseAddrLinks(ips, onlyTls, isVess = false) {
 	// abc.com:端口#节点名
 	// 123.123.123.123:端口#节点名
 	// [abc:1234::1]:端口#节点名
 	const urlReg = /^((?:https?:\/\/)?(?:[\w-]+\.)+[a-z]+|\d{1,3}(?:\.\d{1,3}){3}|\[[a-f0-9:]+\])(?::(\d+))?(?:#([^#\n]+)$)?/i;
-	const vlessReg = new RegExp(`^${atob(pt)}://[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}${atob(at)}((?:[\\w-]+\\.)+[a-z]+|\\d{1,3}(?:\\.\\d{1,3}){3}|\\[[a-f0-9:]+\\]):(\\d+)\\?[^#]+(?:#([^&]+))?`, "i");
+	const vessReg = new RegExp(`^${atob(pt)}://[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}${atob(at)}((?:[\\w-]+\\.)+[a-z]+|\\d{1,3}(?:\\.\\d{1,3}){3}|\\[[a-f0-9:]+\\]):(\\d+)\\?[^#]+(?:#([^&]+))?`, "i");
 
-	return ips.map(ip => {
+	return ips.flatMap(ip => {
 		let regExp = urlReg;
 		if (isVess) {
-			regExp = vlessReg;
+			regExp = vessReg;
 		}
 		let match = regExp.exec(ip);
-
 		if (!match) {
 			return;
 		}
-		let [, address, port = "443", tag = address] = match;
+
+		let [, address, port, tag = address] = match;
 		if (isVess) {
 			if (!match[3]) {
 				ip += ((ip.slice(-1) === "#") ? "" : "#") + encodeURIComponent(tag);
 			}
-			return [address, port, tag, ip];
+			return [[address, port, tag, ip]];
+		} else if (!port) {
+			// 没有设置端口的，根据 CF 默认几个端口返回
+			let res = [];
+			if (!onlyTls) {
+				res = res.concat(Array.from(HttpPort).map(port => {
+					return [address, port, tag]
+				}));
+			}
+			res = res.concat(Array.from(HttpsPort).map(port => {
+				return [address, port, tag]
+			}));
+			return res;
 		}
 
-		return [address, port, tag];
+		return [[address, port, tag]];
 	}).filter(Boolean);
 }
 
