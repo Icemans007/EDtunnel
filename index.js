@@ -1326,12 +1326,12 @@ function getConfig(userIDs, hostName) {
         <h3>vless 配置</h3>
 		<div class="code-container">
 		  <pre><code>${codehtml(vessPart)}</code></pre>
-		  <button class="btn copy-btn" onclick='copyToClipboard("${encodeURIComponent(codehtml(vessPart))}")'><i class="fas fa-copy"></i> 复制</button>
+		  <button class="btn copy-btn" onclick='copyToClipboard("${btoa(codehtml(vessPart))}")'><i class="fas fa-copy"></i> 复制</button>
 		</div>
         <h3>clash 配置</h3>
 		<div class="code-container">
 		  <pre><code>${codehtml(clashPart)}</code></pre>
-		  <button class="btn copy-btn" onclick='copyToClipboard("${encodeURIComponent(codehtml(clashPart))}")'><i class="fas fa-copy"></i> 复制</button>
+		  <button class="btn copy-btn" onclick='copyToClipboard("${btoa(codehtml(clashPart))}")'><i class="fas fa-copy"></i> 复制</button>
 		</div>
       </div>
     `;
