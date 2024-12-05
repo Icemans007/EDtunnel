@@ -107,7 +107,7 @@ export default {
 			const userID_Path = userID.split(',')[0];
 
 			if (request.headers.get('Upgrade') !== 'websocket') {
-				switch (url.pathname.toLowerCase().replace(/\/+$/, '')) {
+				switch (url.pathname.toLowerCase()) {
 					case '/cfrequest':
 						return new Response(JSON.stringify(request.cf, null, 4), {
 							status: 200,
