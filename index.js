@@ -1363,7 +1363,7 @@ function getConfig(userIDs, hostName) {
  * @returns {Promise<Response>} Subscription content
  */
 // @ts-ignore
-async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GENER, CVS, DLS, SUBCONVER, ACL4SSR_CONFIG, onlyTls } = {}) {
+async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GENER, CVS, DLS, SUBCONVER, ACL4SSR_CONFIG, onlyTls }) {
 
 	// 订阅链接转换 clash/sing-box 的服务器后端地址
 	let subconverter = SUBCONVER;
@@ -1471,7 +1471,7 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 	let addresses = [];
 	// CF IP列表
 	if (url.searchParams.has("cfproxylist")) {
-		ADD = url.searchParams.get("cfproxylist")?.trim().split(",").map(list => "api://" + list).join(',');
+		ADD = url.searchParams.get("cfproxylist").trim().split(",").map(list => "api://" + list.trim()).join(',');
 	}
 	if (ADD) {
 		let res = await getReProxys(ADD, onlyTls);
@@ -1787,7 +1787,7 @@ function parseAddrLinks(ips, onlyTls, isVess = false) {
 	// 123.123.123.123:端口#节点名
 	// [abc:1234::1]:端口#节点名
 	const urlReg = /^((?:https?:\/\/)?(?:[\w-]+\.)+[a-z]+|\d{1,3}(?:\.\d{1,3}){3}|\[[a-f0-9:]+\])(?::(\d+))?(?:#([^#\n]+)$)?/i;
-	const vessReg = new RegExp(`^${atob(pt)}://[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}${atob(at)}((?:[\\w-]+\\.)+[a-z]+|\\d{1,3}(?:\\.\\d{1,3}){3}|\\[[a-f0-9:]+\\]):(\\d+)\\?[^#]+(?:#([^&]+))?`, "i");
+	const vessReg = new RegExp(`^${atob(pt)}://[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}${atob(at)}((?:[\\w-]+\\.)+[a-z]+|\\d{1,3}(?:\\.\\d{1,3}){3}|\\[[a-f0-9:]+\\]):(\\d+)\\?[^#]+(?:#(.+)$)?`, "i");
 
 	return ips.flatMap(ip => {
 		let regExp = urlReg;
@@ -1815,7 +1815,7 @@ function parseAddrLinks(ips, onlyTls, isVess = false) {
 				// 	return [address, port, tag]
 				// }));
 			}
-			res.concat([address, "443", tag]);
+			res = res.concat([address, "443", tag]);
 			// res = res.concat(Array.from(HttpsPort).map(port => {
 			// 	return [address, port, tag]
 			// }));
