@@ -174,7 +174,7 @@ async function processProxyip(url, PROXYIP, host, fetch = false) {
 		[proxyIP, proxyPort = '443'] = selectedProxy.split(':');
 	}
 	else if (PROXYIP) {
-		const proxyAddresses = await fetchConfig(PROXYIP.trim().replaceAll(',', '\n'), fetch);
+		const proxyAddresses = await fetchConfig(PROXYIP, fetch);
 		const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
 		[proxyIP, proxyPort = '443'] = selectedProxy.split(':');
 	}
@@ -1485,7 +1485,7 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 		CVS = url.searchParams.get("cfproxycvs");
 	}
 	if (CVS) {
-		let res = await getReProxysFromCsv(CVS, onlyTls, DLS)
+		let res = await getReProxysFromCsv(CVS, onlyTls, DLS);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
@@ -1548,12 +1548,12 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 	});
 }
 
-async function fetchConfig(fetching, needfetch = true, resolve = null, outTime = 6000) {
+async function fetchConfig(config_str, needfetch = true, resolve = null, outTime = 6000) {
 
 	// 避免 api:// 的链接调用循环
 	let apiReference = new Set();
-	let inner = async function (fetching) {
-		return (await Promise.all(fetching.split('\n').map(v => v.trim()).map(async str => {
+	let inner = async function (config_str) {
+		return (await Promise.all(config_str.split(/[\n,]/).map(v => v.trim()).filter(Boolean).map(async str => {
 			// 前面是# 号的是忽略的配置
 			if (str.charAt(0) === '#') return;
 
@@ -1606,7 +1606,7 @@ async function fetchConfig(fetching, needfetch = true, resolve = null, outTime =
 		}))).flat().filter(Boolean).map(ip => ip.trim());
 	}
 
-	return inner(fetching);
+	return inner(config_str);
 }
 
 /**
@@ -1619,7 +1619,7 @@ async function getReProxys(add, onlyTls) {
 		return [];
 	}
 
-	let ips = await fetchConfig(add.replaceAll(',', '\n'));
+	let ips = await fetchConfig(add);
 
 	return parseAddrLinks(ips, onlyTls);
 }
@@ -1777,7 +1777,7 @@ async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDo
 		}
 	}
 
-	let ips = await fetchConfig(generStr.replaceAll(',', '\n'), true, fetch_sub);
+	let ips = await fetchConfig(generStr, true, fetch_sub);
 
 	return parseAddrLinks(ips, onlyTls, true);
 }
