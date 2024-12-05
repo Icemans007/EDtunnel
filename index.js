@@ -1810,12 +1810,12 @@ function parseAddrLinks(ips, onlyTls, isVess = false) {
 			// 没有设置端口的，根据 CF 默认几个端口返回
 			let res = [];
 			if (!onlyTls) {
-				res = res.concat([address, "80", tag]);
+				res = res.concat([[address, "80", tag]]);
 				// res = res.concat(Array.from(HttpPort).map(port => {
 				// 	return [address, port, tag]
 				// }));
 			}
-			res = res.concat([address, "443", tag]);
+			res = res.concat([[address, "443", tag]]);
 			// res = res.concat(Array.from(HttpsPort).map(port => {
 			// 	return [address, port, tag]
 			// }));
