@@ -140,9 +140,13 @@ export default {
 					case '/':
 						// @ts-ignore
 						if (env.URL302) return Response.redirect(env.URL302, 302);
+						return handleDefaultPath(url, request);
 					default:
 						// 伪装页面
-						return handleDefaultPath(url, request);
+						return new Response(null, {
+							status: 404,
+							headers: { "Content-Type": "text/html; charset=utf-8" }
+						});
 				}
 			} else {
 				return await ProtocolOverWSHandler(request);
