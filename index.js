@@ -81,8 +81,6 @@ export default {
 
 			[proxyIP, proxyPort] = await processProxyip(url, PROXYIP, host);
 
-			console.log('ProxyIP:', proxyIP);
-			console.log('ProxyPort:', proxyPort);
 			if (socks5Address) {
 				try {
 					// Split SOCKS5 into an array of addresses
