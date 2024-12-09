@@ -104,22 +104,24 @@ export default {
 				onlyTls = true;
 			}
 
-			const userID_Path = userID.split(',')[0];
-
 			if (request.headers.get('Upgrade') !== 'websocket') {
-				switch (url.pathname.toLowerCase()) {
-					case '/cfrequest':
+
+				let pathname = url.pathname.toLowerCase().trim();
+				let userID_Path = userID.split(',').find(uuid => uuid.trim() === pathname.slice(1)) || userID.split(',')[0];
+
+				switch (true) {
+					case pathname === '/':
+						// @ts-ignore
+						if (env.URL302) return Response.redirect(env.URL302, 302);
+						// 伪装页面
+						return handleDefaultPath(url, request);
+					case pathname === '/cfrequest':
 						return new Response(JSON.stringify(request.cf, null, 4), {
 							status: 200,
 							headers: { "Content-Type": "application/json;charset=utf-8" },
 						});
-					case `/${userID_Path}`:
-						return new Response(getConfig(userID, host), {
-							status: 200,
-							headers: { "Content-Type": "text/html; charset=utf-8" },
-						});
-					case "/convertersubrequest": // 第三方后端订阅转换服务请求
-					case `/sub/${userID_Path}`:	// 包含自适应模式
+					case pathname === '/convertersubrequest':
+					case pathname === `/${userID_Path}`:
 						let args = {
 							userID: userID_Path,
 							host,
@@ -137,17 +139,13 @@ export default {
 						return GenSub(args);
 					// case `/bestip/${userID_Path}`:
 					// 	   return fetch(`https://sub.xf.free.hr/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
-					case '/':
-						// @ts-ignore
-						if (env.URL302) return Response.redirect(env.URL302, 302);
-						return handleDefaultPath(url, request);
 					default:
-						// 伪装页面
 						return new Response(null, {
 							status: 404,
 							headers: { "Content-Type": "text/html; charset=utf-8" }
 						});
 				}
+
 			} else {
 				return await ProtocolOverWSHandler(request);
 			}
@@ -665,8 +663,8 @@ function ProcessProtocolHeader(protocolBuffer, userID) {
 	const slicedBufferString = stringify(new Uint8Array(protocolBuffer.slice(1, 17)));
 
 	const uuids = userID.includes(',') ? userID.split(",") : [userID];
-	const isValidUser = uuids.some(uuid => slicedBufferString === uuid.trim()) ||
-		(uuids.length === 1 && slicedBufferString === uuids[0].trim());
+	const isValidUser = (uuids.length === 1 && slicedBufferString === uuids[0].trim()) ||
+		uuids.some(uuid => slicedBufferString === uuid.trim());
 
 	console.log(`userID: ${slicedBufferString}`);
 
@@ -1101,21 +1099,18 @@ const pt = 'dmxlc3M=';
 
 /**
  * Generates configuration for VESS client.
- * @param {string} userIDs - Single or comma-separated user IDs
+ * @param {string} userID - userID
  * @param {string} hostName - Host name for configuration
  * @returns {string} Configuration HTML
  */
-function getConfig(userIDs, hostName) {
+function getConfig(userID, hostName) {
 	const randomPath = () => '/' + Math.random().toString(36).substring(2, 15) + '?ed=2560';
 	const commonUrlPartHttp = `?encryption=none&security=none&fp=randomized&type=ws&host=${hostName}&path=${encodeURIComponent(randomPath())}#`;
 	const commonUrlPartHttps = `?encryption=none&security=tls&sni=${hostName}&fp=randomized&type=ws&host=${hostName}&path=%2F%3Fed%3D2560#`;
 
-	// Split the userIDs into an array
-	const userIDArray = userIDs.split(',');
-
-	// Prepare output string for each userID
-	const sublink = `https://${hostName}/sub/${userIDArray[0]}`;
-	// const subbestip = `https://${hostName}/bestip/${userIDArray[0]}`;
+	// Prepare output string for userID
+	const sublink = `https://${hostName}/${userID}`;
+	// const subbestip = `https://${hostName}/bestip/${userID}`;
 	// HTML Head with CSS and FontAwesome library
 	const htmlHead = `
   <head>
@@ -1264,7 +1259,7 @@ function getConfig(userIDs, hostName) {
     </div>
   `;
 
-	const configOutput = userIDArray.flatMap((userID) => {
+	const configOutput = function () {
 		let vessPart = [];
 		let clashPart = [];
 
@@ -1339,14 +1334,14 @@ function getConfig(userIDs, hostName) {
 		</div>
       </div>
     `;
-	}).join('');
+	}
 
 	return `
   <html>
   ${htmlHead}
   <body>
     ${header}
-    ${configOutput}
+    ${configOutput()}
   </body>
   <script>
     function copyToClipboard(text) {
@@ -1374,11 +1369,11 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 	// 订阅转换配置文件
 	let subConverterMode = ACL4SSR_CONFIG || "https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/refs/heads/master/Clash/config/ACL4SSR_Online.ini";
 
-	let fakeUserID = generateRandomUUID();
-	let randomDomain = generateRandomStr(12) + [".net", ".com", ".org", ".edu", ".cn", ".jp", ".xyz", ".us"].at(Math.random() * 8 | 0);
-
 	let target = "";
-	if (url.searchParams.has('clash') || userAgent.includes('clash')) {
+	if (url.searchParams.has('sub')) {
+		target = "sub";
+	}
+	else if (url.searchParams.has('clash') || userAgent.includes('clash')) {
 		target = "clash";
 	}
 	else if (url.searchParams.has('singbox') || url.searchParams.has('sing-box')
@@ -1386,10 +1381,19 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 		target = "singbox";
 	}
 
+	if (!target && userAgent.toLowerCase().includes('mozilla')) {
+		return new Response(getConfig(userID, host), {
+			status: 200,
+			headers: { "Content-Type": "text/html; charset=utf-8" },
+		});
+	}
+
+	let fakeUserID = generateRandomUUID();
+	let randomDomain = generateRandomStr(12) + [".net", ".com", ".org", ".edu", ".cn", ".jp", ".xyz", ".us"].at(Math.random() * 8 | 0);
 	// 是否是第三方后端订阅转换服务请求 https://${host}/convertersubrequest
 	let isSubReq = url.pathname.toLowerCase().startsWith("/convertersubrequest");
 
-	if (target && !isSubReq) {
+	if ((target === "clash" || target === "singbox") && !isSubReq) {
 		if (url.searchParams.get("subconverter")?.trim()) {
 			subconverter = url.searchParams.get("subconverter");
 		}

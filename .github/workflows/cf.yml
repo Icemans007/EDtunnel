@@ -44,6 +44,8 @@ on:
       - ".prettierrc.json"
       - "LICENSE"
       - "run"
+      - "index.js"
+      - ".gitignore"
   repository_dispatch:
 
 env:
