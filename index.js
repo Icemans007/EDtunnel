@@ -1108,8 +1108,8 @@ const pt = 'dmxlc3M=';
  */
 function getConfig(userID, hostName) {
 	const randomPath = () => '/' + Math.random().toString(36).substring(2, 15) + '?ed=2560';
-	const commonUrlPartHttp = `?encryption=none&security=none&fp=randomized&type=ws&host=${hostName}&path=${encodeURIComponent(randomPath())}#`;
-	const commonUrlPartHttps = `?encryption=none&security=tls&sni=${hostName}&fp=randomized&type=ws&host=${hostName}&path=%2F%3Fed%3D2560#`;
+	const commonUrlPartHttp = `?encryption=none&security=none&fp=chrome&type=ws&host=${hostName}&path=${encodeURIComponent(randomPath())}#`;
+	const commonUrlPartHttps = `?encryption=none&security=tls&sni=${hostName}&fp=chrome&type=ws&host=${hostName}&path=%2F%3Fed%3D2560#`;
 
 	// Prepare output string for userID
 	const sublink = `https://${hostName}/${userID}`;
@@ -1424,7 +1424,7 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 		}
 		suburl += `token=${btoa(fakeUserID + "@" + randomDomain)}`;
 		let ffetch = `${subconverter}/sub?target=${target}&url=${encodeURIComponent(suburl)}&insert=false\
-&config=${encodeURIComponent(subConverterMode)}&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
+&config=${encodeURIComponent(subConverterMode)}&udp=true&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
 
 		try {
 			let response = await fetch(ffetch, {
@@ -1537,7 +1537,7 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 
 			// 没有 url_arr[3] 的配置默认链接，且绑定proxyip
 			let vess = url_arr[3] || `${atob(pt)}://${userID}${atob(at)}${url_arr[0]}:${url_arr[1]}?encryption=none\
-&type=ws${onlyTls ? "&security=tls" : ""}&host=${host}&path=${encodeURIComponent("/?ed=2560")}#${encodeURIComponent(url_arr[2])}`;
+&type=ws${onlyTls ? "&security=tls" : ""}&host=${host}&sni=${host}&path=${encodeURIComponent("/?ed=2560")}#${encodeURIComponent(url_arr[2])}`;
 			// 换成假数据
 			vess = !isSubReq ? vess : vess.replace(new RegExp(userID, 'gm'), fakeUserID).replace(new RegExp(host, 'gm'), randomDomain);
 
