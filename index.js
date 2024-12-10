@@ -174,13 +174,10 @@ async function processProxyip(url, PROXYIP, host, fetch = false) {
 		[proxyIP, proxyPort = '443'] = selectedProxy.split(':');
 	}
 	else if (PROXYIP) {
-		const proxyAddresses = await fetchConfig(PROXYIP, fetch);
+		// const proxyAddresses = await fetchConfig(PROXYIP, fetch);
+		const proxyAddresses = PROXYIP.split(/[\n,]/).map(addr => addr.trim()).filter(Boolean);
 		const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
 		[proxyIP, proxyPort = '443'] = selectedProxy.split(':');
-	}
-	else {
-		proxyIP = host;
-		proxyPort = '443';
 	}
 
 	return [proxyIP, proxyPort];
@@ -1514,7 +1511,8 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 	}
 
 	// 这里query proxyip 会多一个api请求获取proxyip过程
-	let [proxyIP, proxyPort] = await processProxyip(url, PROXYIP, host, true);
+	// let [proxyIP, proxyPort] = await processProxyip(url, PROXYIP, host, true);
+	// &path=${encodeURIComponent("/?ed=2560&proxyip=" + proxyIP + ":" + proxyPort)}
 
 	// 如果是isSubReq，需要设置替换为假信息， 根据 address:port 去重， tag相同+1递增
 	let uniqueTags = new Map(Array.from(new Set(addresses.map(m => m[2]))).map(a => [a, 0]));
@@ -1531,7 +1529,7 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 
 			// 没有 url_arr[3] 的配置默认链接，且绑定proxyip
 			let vess = url_arr[3] || `${atob(pt)}://${userID}${atob(at)}${url_arr[0]}:${url_arr[1]}?encryption=none\
-&type=ws${onlyTls ? "&security=tls" : ""}&host=${host}&path=${encodeURIComponent("/?ed=2560&proxyip=" + proxyIP + ":" + proxyPort)}#${encodeURIComponent(url_arr[2])}`;
+&type=ws${onlyTls ? "&security=tls" : ""}&host=${host}&path=${encodeURIComponent("/?ed=2560")}#${encodeURIComponent(url_arr[2])}`;
 			// 换成假数据
 			vess = !isSubReq ? vess : vess.replace(new RegExp(userID, 'gm'), fakeUserID).replace(new RegExp(host, 'gm'), randomDomain);
 
@@ -1703,7 +1701,7 @@ async function getReProxysFromCsv(cvs, onlyTls, DLS) {
 				if (onlyTls && columns[tlsColIndex].toLowerCase() !== "true") continue;
 
 				// 在数据中获取速度单位
-				if (i == 1 && !speedUnits) {
+				if (!speedUnits) {
 					if (columns[speedColIndex]?.toLowerCase().includes('kb')) {
 						speedUnits = "KB";
 					} else if (columns[speedColIndex]?.toLowerCase().includes('mb')) {
@@ -1713,7 +1711,7 @@ async function getReProxysFromCsv(cvs, onlyTls, DLS) {
 				// 检查速度大于DLS(DLS 是MB)
 				let dataSpeed = parseFloat(columns[speedColIndex]);
 				if (DLS > 0 && !isNaN(dataSpeed)) {
-					if (speedUnits == "KB") {
+					if (speedUnits === "KB") {
 						dataSpeed = Math.round(dataSpeed / 10) / 100;
 					}
 					if (dataSpeed < DLS) {
