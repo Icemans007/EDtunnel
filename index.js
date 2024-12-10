@@ -138,7 +138,14 @@ export default {
 					// case `/bestip/${userID_Path}`:
 					// 	   return fetch(`https://sub.xf.free.hr/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
 					default:
-						return new Response(null, {
+						return new Response(`<html>
+<head><title>${host} - Cloud Drive</title></head>
+<body>
+<center><h1>404 Not Found</h1></center>
+<hr><center>nginx</center>
+</body>
+</html>
+<!-- a padding to disable MSIE and Chrome friendly error page -->`, {
 							status: 404,
 							headers: { "Content-Type": "text/html; charset=utf-8" }
 						});
@@ -428,6 +435,7 @@ function handleDefaultPath(url, request) {
 		  </script>
 	  </body>
 	  </html>
+	  <!-- a padding to disable MSIE and Chrome friendly error page -->
 	`;
 
 	// 返回伪装的网盘页面
@@ -1256,7 +1264,7 @@ function getConfig(userID, hostName) {
 
 	const configOutput = function () {
 		let vessPart = [];
-		let clashPart = [];
+		let clashPart = ["proxies:"];
 
 		vessPart = vessPart.concat(Array.from(HttpsPort).map(port => {
 			const urlPart = encodeURIComponent(`${hostName}-HTTPS-${port}`);
@@ -1264,20 +1272,20 @@ function getConfig(userID, hostName) {
 		}));
 
 		clashPart = clashPart.concat(Array.from(HttpsPort).map(port => {
-			return `- type: ${atob(pt)}
-  name: ${hostName}-HTTPS-${port}
-  server: ${hostName}
-  port: ${port}
-  uuid: ${userID}
-  network: ws
-  tls: true
-  udp: true
-  sni: ${hostName}
-  client-fingerprint: randomized
-  ws-opts:
-  path: "/?ed=2560"
-  headers:
-    host: ${hostName}`;
+			return `  - name: ${hostName}-HTTPS-${port}
+    server: ${hostName}
+    port: ${port}
+    type: ${atob(pt)}
+    uuid: ${userID}
+    network: ws
+    tls: true
+    udp: true
+    sni: ${hostName}
+    client-fingerprint: chrome
+    ws-opts:
+    path: "/?ed=2560"
+    headers:
+      host: ${hostName}`;
 		}));
 
 		if (!onlyTls) {
@@ -1287,20 +1295,20 @@ function getConfig(userID, hostName) {
 			}));
 
 			clashPart = clashPart.concat(Array.from(HttpPort).map(port => {
-				return `- type: ${atob(pt)}
-  name: ${hostName}-HTTP-${port}
-  server: ${hostName}
-  port: ${port}
-  uuid: ${userID}
-  network: ws
-  tls: none
-  udp: true
-  sni: ${hostName}
-  client-fingerprint: randomized
-  ws-opts:
-  path: "/?ed=2560"
-  headers:
-    host: ${hostName}`;
+				return `  - name: ${hostName}-HTTP-${port}
+    server: ${hostName}
+    port: ${port}
+    type: ${atob(pt)}
+    uuid: ${userID}
+    network: ws
+    tls: none
+    udp: true
+    sni: ${hostName}
+    client-fingerprint: chrome
+    ws-opts:
+    path: "/?ed=2560"
+    headers:
+      host: ${hostName}`;
 			}));
 		}
 
