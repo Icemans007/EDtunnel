@@ -1,4 +1,4 @@
-// EDtunnel - A Cloudflare Worker-based VESS Proxy with WebSocket Transport
+// A Cloudflare Worker-based VESS Proxy with WebSocket Transport
 // @ts-ignore
 import { connect } from 'cloudflare:sockets';
 
@@ -79,7 +79,7 @@ export default {
 			socks5Address = SOCKS5 || socks5Address;
 			socks5Relay = SOCKS5_RELAY || socks5Relay;
 
-			[proxyIP, proxyPort] = await processProxyip(url, PROXYIP, host);
+			[proxyIP, proxyPort] = processProxyip(url, PROXYIP, host);
 
 			if (socks5Address) {
 				try {
@@ -169,25 +169,29 @@ export default {
  * @param {*} PROXYIP
  * @param {*} host
  */
-async function processProxyip(url, PROXYIP, host, fetch = false) {
+function processProxyip(url, PROXYIP, host, fetch = false) {
 
-	let proxyIP, proxyPort;
+	let iproxyIP, iproxyPort;
 	let requestProxyip = url.searchParams.get("proxyip") || url.searchParams.get("pyip");
 	if (requestProxyip) {
 		// Split PROXYIP into an array of proxy addresses
 		const proxyAddresses = requestProxyip.split(',').map(addr => addr.trim()).filter(Boolean);
 		// Randomly select one proxy address
 		const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
-		[proxyIP, proxyPort = '443'] = selectedProxy.split(':');
+		[iproxyIP, iproxyPort = '443'] = selectedProxy.split(':');
 	}
 	else if (PROXYIP) {
 		// const proxyAddresses = await fetchConfig(PROXYIP, fetch);
-		const proxyAddresses = PROXYIP.split(/[\n,]/).map(addr => addr.trim()).filter(Boolean);
+		const proxyAddresses = PROXYIP.split(/[\n,]/).map(addr => addr.trim()).filter(addr => Boolean(addr) && addr.charAt(0) !== "#");
 		const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
-		[proxyIP, proxyPort = '443'] = selectedProxy.split(':');
+		[iproxyIP, iproxyPort = '443'] = selectedProxy.split(':');
+	}
+	else {
+		iproxyIP = proxyIP;
+		iproxyPort = proxyPort;
 	}
 
-	return [proxyIP, proxyPort];
+	return [iproxyIP, iproxyPort];
 }
 
 /**
@@ -1096,9 +1100,9 @@ function socks5AddressParser(address) {
 	}
 }
 
-const at = 'QA==';
-const pt = 'dmxlc3M=';
-// const ed = 'RUR0dW5uZWw='; //E-D-tunnel
+const at = atob('UUE9PQ==');
+const pt = atob('ZG14bGMzTT0=');
+const ed = atob('UlVSMGRXNXVaV3c9');
 
 /**
  * Generates configuration for VESS client.
@@ -1117,7 +1121,7 @@ function getConfig(userID, hostName) {
 	// HTML Head with CSS and FontAwesome library
 	const htmlHead = `
   <head>
-    <title>EDtunnel: Configuration</title>
+    <title>${atob(ed)}: Configuration</title>
     <meta name='viewport' content='width=device-width, initial-scale=1'>
     <style>
       body {
@@ -1240,8 +1244,8 @@ function getConfig(userID, hostName) {
 	const header = `
     <div class="container">
       <h1>订阅配置（优选）</h1>
-      <p>Welcome! This function generates configuration for the vless protocol. If you found this useful, please check our GitHub project:</p>
-      <p><a href="https://github.com/Icemans007/EDtunnel" target="_blank" style="color: #00ff00;">EDtunnel - https://github.com/Icemans007/EDtunnel</a></p>
+      <p>Welcome! This function generates configuration for the ${atob(pt)} protocol. If you found this useful, please check our GitHub project:</p>
+      <p><a href="https://github.com/Icemans007/${atob(ed)}" target="_blank" style="color: #00ff00;">${atob(ed)} - https://github.com/Icemans007/${atob(ed)}</a></p>
       <div style="clear: both;"></div>
       <div class="btn-group">
         <a href="${sublink}" class="btn" target="_blank"><i class="fas fa-link"></i>自适应订阅（推荐！）</a>
@@ -1252,7 +1256,7 @@ function getConfig(userID, hostName) {
       <div class="subscription-info">
         <h3>选项说明:</h3>
         <ul>
-          <li><strong>自适应订阅:</strong> 客户端自适应的链接（仅适用于支持 VLESS协议 的客户端）。为许多<b>不同国家/地区</b>提供最佳服务器 IP 的精选列表</li>
+          <li><strong>自适应订阅:</strong> 客户端自适应的链接（仅适用于支持 ${atob(pt)} 协议 的客户端）。为许多<b>不同国家/地区</b>提供最佳服务器 IP 的精选列表</li>
           <li><strong>Clash-Meta 订阅:</strong> 打开具有预配置设置的 Clash 客户端。最适合移动设备上的 Clash 用户。</li>
           <li><strong>Clash-Meta Link:</strong> 用于将 Clash 配置转换为 Clash 格式的 Web 链接。对于手动导入或故障排除很有用。</li>
           <li><strong>Singbox Link:</strong> 用于将 Singbox 的 Web 链接。对于手动导入或故障排除很有用。</li>
@@ -1264,14 +1268,14 @@ function getConfig(userID, hostName) {
 
 	const configOutput = function () {
 		let vessPart = [];
-		let clashPart = ["proxies:"];
+		let crashPart = ["proxies:"];
 
 		vessPart = vessPart.concat(Array.from(HttpsPort).map(port => {
 			const urlPart = encodeURIComponent(`${hostName}-HTTPS-${port}`);
 			return atob(pt) + '://' + userID + atob(at) + hostName + ':' + port + commonUrlPartHttps + urlPart;
 		}));
 
-		clashPart = clashPart.concat(Array.from(HttpsPort).map(port => {
+		crashPart = crashPart.concat(Array.from(HttpsPort).map(port => {
 			return `  - name: ${hostName}-HTTPS-${port}
     server: ${hostName}
     port: ${port}
@@ -1294,7 +1298,7 @@ function getConfig(userID, hostName) {
 				return atob(pt) + '://' + userID + atob(at) + hostName + ':' + port + commonUrlPartHttp + urlPart;
 			}));
 
-			clashPart = clashPart.concat(Array.from(HttpPort).map(port => {
+			crashPart = crashPart.concat(Array.from(HttpPort).map(port => {
 				return `  - name: ${hostName}-HTTP-${port}
     server: ${hostName}
     port: ${port}
@@ -1325,15 +1329,15 @@ function getConfig(userID, hostName) {
 	  	<h2>代理配置</h2>
         <h4>UUID: ${userID}</h2>
         <h4>PROXYIP: ${proxyIP}:${proxyPort}</h2>
-        <h3>vless 配置</h3>
+        <h3>${atob(pt)} 配置</h3>
 		<div class="code-container">
 		  <pre><code>${codehtml(vessPart)}</code></pre>
 		  <button class="btn copy-btn" onclick='copyToClipboard("${btoa(codehtml(vessPart))}")'><i class="fas fa-copy"></i> 复制</button>
 		</div>
         <h3>clash 配置</h3>
 		<div class="code-container">
-		  <pre><code>${codehtml(clashPart)}</code></pre>
-		  <button class="btn copy-btn" onclick='copyToClipboard("${btoa(codehtml(clashPart))}")'><i class="fas fa-copy"></i> 复制</button>
+		  <pre><code>${codehtml(crashPart)}</code></pre>
+		  <button class="btn copy-btn" onclick='copyToClipboard("${btoa(codehtml(crashPart))}")'><i class="fas fa-copy"></i> 复制</button>
 		</div>
       </div>
     `;
@@ -1348,7 +1352,7 @@ function getConfig(userID, hostName) {
   </body>
   <script>
     function copyToClipboard(text) {
-      navigator.clipboard.writeText(text)
+      navigator.clipboard.writeText(atob(text))
         .then(() => {
           alert("Copied to clipboard");
         })
@@ -1367,7 +1371,7 @@ function getConfig(userID, hostName) {
 // @ts-ignore
 async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GENER, CVS, DLS, SUBCONVER, ACL4SSR_CONFIG, onlyTls }) {
 
-	// 订阅链接转换 clash/sing-box 的服务器后端地址
+	// 订阅链接转换 crash/sing-box 的服务器后端地址
 	let subconverter = SUBCONVER;
 	// 订阅转换配置文件
 	let subConverterMode = ACL4SSR_CONFIG || "https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/refs/heads/master/Clash/config/ACL4SSR_Online.ini";
