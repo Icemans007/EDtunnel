@@ -1,5 +1,5 @@
 {
-  "name": "cf-worker-ws-dev",
+  "name": "edtunnel",
   "version": "1.0.0",
   "description": "A tunnel for the ED_tunnel project to allow deployed applications to cloudflare pages and workers to be accessed via a custom domain.",
   "main": "_worker.js",
