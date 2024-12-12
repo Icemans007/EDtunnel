@@ -1705,7 +1705,7 @@ async function getReProxysFromCsv(cvs, onlyTls, DLS) {
 	let cvsUrls = cvs.split(/[,\n]/);
 	// 避免 api:// 的链接调用循环
 	let apiReference = new Set();
-	cvsUrls.forEach(async furl => {
+	for (let furl of cvsUrls) {
 		try {
 			let resp = await fetchUrl(furl, 6000, apiReference);
 			handleCVS(resp);
@@ -1713,7 +1713,7 @@ async function getReProxysFromCsv(cvs, onlyTls, DLS) {
 			console.error('获取地址时出错: ' + furl, err.message);
 			return []; // 如果有错误，直接返回
 		}
-	});
+	}
 
 	return addresses;
 }
@@ -1839,7 +1839,7 @@ async function fetchUrl(furl, outTime = 5000, apiAvoidDupRef = null, UA = "Mozil
 		throw error;
 	});
 	if (!resp.ok) {
-		throw resp.statusText;
+		throw new Error(resp.statusText);
 	}
 
 	return respText ? resp.text() : resp;
