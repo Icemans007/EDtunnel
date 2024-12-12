@@ -1595,13 +1595,13 @@ async function getReProxys(add, onlyTls) {
 	return parseAddrLinks(ips, onlyTls);
 }
 
-async function getReProxysFromCsv(cvs, onlyTls, DLS) {
+async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 8) {
 	if (!cvs || (cvs = cvs.trim()).length == 0) {
 		return [];
 	}
 
-	// csv 数据太多，默认是排序的，每个CVS表格只获取符合条件的前16条
-	const MAXROW = 8;
+	// csv 数据太多，默认是排序的，每个CVS表格只获取符合条件的前8条
+	const [DLS = 8, MAXROW = 8] = String(DLSstr).split(":").map(d => isFinite(d) ? d : undefined);
 	let addresses = [];
 
 	const handleCVS = function (lines) {
@@ -1639,7 +1639,6 @@ async function getReProxysFromCsv(cvs, onlyTls, DLS) {
 				maxrow = MAXROW;
 				ipColIndex = header.findIndex(str => str.includes('ip'));
 				portColIndex = header.findIndex(str => str.indexOf('端口') !== -1 || str.indexOf('port') !== -1);
-
 				if (ipColIndex === -1 || portColIndex === -1) {
 					console.warn('CSV文件缺少必需的字段');
 					return;
