@@ -1644,109 +1644,110 @@ async function getReProxysFromCsv(cvs, onlyTls, DLS) {
 	if (!cvs || (cvs = cvs.trim()).length == 0) {
 		return [];
 	}
-	// csv 数据太多，每个只获取前 8 条
-	const MAXROW = 8;
 
-	let addresses = [];
+	// csv 数据太多，一次只获取符合条件的前16条
+	const MAXROW = 16;
+	cvs = cvs.split(",").map(list => "api://" + list.trim()).join(',');
 
-	let csvUrls = cvs.split(/[\n,]/).map(v => v.trim());
-	for (let csvUrl of csvUrls) {
-		let converSplit = csvUrl.split("://");
-		if (converSplit.length < 2) {
-			csvUrl = "https://" + converSplit[0];
+	let handler = function (lines) {
+		lines = lines.split('\n').map(txt => txt.trim()).filter(Boolean);
+		if (!lines || lines.length === 0) {
+			console.warn('CSV文件为空: ', cvs);
+			return;
 		}
 
-		try {
-			let resp = await fetch(csvUrl, {
-				method: 'get',
-				headers: {
-					'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
-					'User-Agent': 'Mozilla/5.0 Chrome/131.0.0.0'
+		let addresses = [];
+		let header = null;
+		let huf = false;	// 标记header头是否重新更新
+		let ipColIndex = -1;
+		let portColIndex = -1;
+		let tlsColIndex = -1;
+		let countryColIndex = -1;
+		let cityColIndex = -1;
+		let speedColIndex = -1;
+		let speedUnits = ""; // cvs 测速单位
+		let maxrow = MAXROW;
+
+		for (let i = 0; i < lines.length && maxrow > 0; i++) {
+			if (lines[i].length === 0) {
+				continue;
+			}
+			if (lines[i].toLowerCase().includes('ip')) {
+				header = lines[i].toLowerCase().split(',').map(txt => txt.trim());
+				huf = true;
+			}
+			if (!header) {
+				console.warn('CSV文件缺少头部字段');
+				return;
+			}
+
+			if (huf) {
+				huf = false;
+				ipColIndex = header.findIndex(str => str.includes('ip'));
+				portColIndex = header.findIndex(str => str.indexOf('端口') !== -1 || str.indexOf('port') !== -1);
+				
+				if (ipColIndex === -1 || portColIndex === -1) {
+					console.warn('CSV文件缺少必需的字段');
+					return;
 				}
-			});
-			if (!resp.ok) {
-				console.warn('获取csv地址时出错: ' + csvUrl, resp.status, resp.statusText);
+
+				tlsColIndex = header.indexOf('tls');
+				countryColIndex = header.findIndex(str => str.indexOf('国家') !== -1 || str.indexOf('country') !== -1);
+				cityColIndex = header.findIndex(str => str.indexOf('城市') !== -1 || str.indexOf('city') !== -1);
+				speedColIndex = header.findLastIndex(item => item.includes("速度") || item.includes("speed"));
+				speedUnits = "";	// 换了header, 单位重新计算
+
+				if (header[speedColIndex]?.includes('kb')) {
+					speedUnits = "KB";
+				}
+				else if (header[speedColIndex]?.includes('mb')) {
+					speedUnits = "MB";
+				}
+
 				continue;
 			}
 
-			let lines = (await resp.text()).split('\n').map(txt => txt.trim()).filter(Boolean);
-			if (!lines || lines.length === 0) {
-				console.warn('CSV文件为空', csvUrl);
-				continue;
+			let columns = lines[i].split(',').map(txt => txt.trim());
+			if (columns.length !== header.length) {
+				console.warn('CSV文件数据错乱');
+				return;
 			}
 
-			let header = lines[0].split(',').map(txt => txt.trim().toLowerCase());
-			// 检查CSV头部是否包含必需字段
-			let tlsColIndex = header.indexOf('tls');
-			if (tlsColIndex === -1) {
-				console.warn('CSV文件缺少【TLS】必需的字段');
-				continue;
-			}
-
-			let ipColIndex = 0;					// IP地址在 CSV 头部的位置
-			let portColIndex = 1;					// 端口在 CSV 头部的位置
-			// let idcColIndex = tlsColIndex + 1; 	// 数据中心是 TLS 的后一个字段
-			let countryColIndex = header.indexOf('国家');
-			countryColIndex = countryColIndex !== -1 ? countryColIndex : header.indexOf('country');
-			let cityColIndex = header.indexOf('城市');
-			cityColIndex = cityColIndex !== -1 ? cityColIndex : header.indexOf('city');
-			let speedColIndex = header.findIndex(item => item.includes("速度") || item.includes("speed"));
-			// 速度一般是最后一个字段
-			if (speedColIndex === -1) {
-				speedColIndex = header.length - 1;
-			}
-
-			// cvs 测速单位
-			let speedUnits = "";
-			if (header[speedColIndex]?.includes('kb')) {
-				speedUnits = "KB";
-			}
-			else if (header[speedColIndex]?.includes('mb')) {
-				speedUnits = "MB";
-			}
-
-			let maxrow = MAXROW;
-			// 从第二行开始遍历CSV行
-			for (let i = 1; i < lines.length && maxrow > 0; i++) {
-				let columns = lines[i].split(',').map(txt => txt.trim());
-
-				if (onlyTls && columns[tlsColIndex].toLowerCase() !== "true") continue;
-
-				// 在数据中获取速度单位
-				if (!speedUnits) {
-					if (columns[speedColIndex]?.toLowerCase().includes('kb')) {
-						speedUnits = "KB";
-					} else if (columns[speedColIndex]?.toLowerCase().includes('mb')) {
-						speedUnits = "MB";
-					}
+			if (onlyTls && columns[tlsColIndex]?.toLowerCase() !== "true") continue;
+			// 在数据中获取速度单位
+			if (!speedUnits) {
+				if (columns[speedColIndex]?.toLowerCase().includes('kb')) {
+					speedUnits = "KB";
+				} else if (columns[speedColIndex]?.toLowerCase().includes('mb')) {
+					speedUnits = "MB";
 				}
-				// 检查速度大于DLS(DLS 是MB)
-				let dataSpeed = parseFloat(columns[speedColIndex]);
-				if (DLS > 0 && !isNaN(dataSpeed)) {
-					if (speedUnits === "KB") {
-						dataSpeed = Math.round(dataSpeed / 10) / 100;
-					}
-					if (dataSpeed < DLS) {
-						continue;
-					}
-				}
-
-				let tag = "";
-				if (columns[countryColIndex]) tag += columns[countryColIndex] + " ";
-				if (columns[cityColIndex]) tag += columns[cityColIndex];
-				// if (columns[idcColIndex]) tag += "(" + columns[idcColIndex] + ")";
-				if (tag.length === 0) tag += columns[ipColIndex];
-
-				let address = [columns[ipColIndex], columns[portColIndex], tag];
-				addresses.push(address);
-				maxrow--;
 			}
-		} catch (err) {
-			console.error('解析CSV文件内容出错', err);
+
+			// 检查速度大于DLS(DLS 是MB)
+			let dataSpeed = parseFloat(columns[speedColIndex]);
+			if (DLS > 0 && !isNaN(dataSpeed)) {
+				if (speedUnits === "KB") {
+					dataSpeed = Math.round(dataSpeed / 10) / 100;
+				}
+				if (dataSpeed < DLS) {
+					continue;
+				}
+			}
+
+			let tag = "";
+			if (columns[countryColIndex]) tag += columns[countryColIndex] + " ";
+			if (columns[cityColIndex]) tag += columns[cityColIndex];
+			if (tag.length === 0) tag += columns[ipColIndex];
+
+			let address = [columns[ipColIndex], columns[portColIndex], tag];
+			addresses.push(address);
+			maxrow--;
 		}
+
+		return addresses;
 	}
 
-	return addresses;
+	return fetchConfig(cvs, true, handler);
 }
 
 // @ts-ignore

@@ -98,10 +98,18 @@ jobs:
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           # input overrides env-defaults, regardless
-          # environment: ${{ env.WORKERS_ENV }}
+          environment: ${{ env.WORKERS_ENV }}
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           GIT_COMMIT_ID: ${{ env.GIT_REF }}
+          UUID: ${{ vars.API_URL }}
+          PROXYIP: ${{ vars.PROXYIP }}
+          ADD: ${{ vars.ADD }}
+          CF_PROXY_GENER: ${{ vars.CF_PROXY_GENER }}
+          CVS: ${{ vars.CVS }}
+          DLS: ${{ vars.DLS }}
+          ACL4SSR_CONFIG: ${{ vars.ACL4SSR_CONFIG }}
+          SUBCONVER: ${{ vars.SUBCONVER }}
 
       - name: 🎤 Notice
         run: |
