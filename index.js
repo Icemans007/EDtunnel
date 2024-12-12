@@ -1,5 +1,4 @@
 // A Cloudflare Worker-based VESS Proxy with WebSocket Transport
-// @ts-ignore
 import { connect } from 'cloudflare:sockets';
 
 // ======================================
@@ -1368,7 +1367,6 @@ function getConfig(userID, hostName) {
  * Generates subscription content.
  * @returns {Promise<Response>} Subscription content
  */
-// @ts-ignore
 async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GENER, CVS, DLS, SUBCONVER, ACL4SSR_CONFIG, onlyTls }) {
 
 	// 订阅链接转换 crash/sing-box 的服务器后端地址
@@ -1431,21 +1429,15 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 &config=${encodeURIComponent(subConverterMode)}&udp=true&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
 
 		try {
-			let response = await fetch(ffetch, {
-				method: 'get',
-				headers: {
-					'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
-					'User-Agent': userAgent
-				}
-			});
-			if (!response.ok) {
-				console.warn('请求subconverter结果错误: ' + ffetch, response.status, response.statusText);
-			}
-
+			let response = await fetchUrl(ffetch, 8000, null, userAgent, false);
 			// 还原假信息为真
+			// @ts-ignore
 			return new Response((await response.text()).replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(randomDomain, 'gm'), host), {
+				// @ts-ignore
 				status: response.status,
+				// @ts-ignore
 				statusText: response.statusText,
+				// @ts-ignore
 				headers: response.headers
 			});
 		} catch (err) {
@@ -1565,7 +1557,6 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 }
 
 async function fetchConfig(config_str, needfetch = true, resolve = null, outTime = 6000) {
-
 	// 避免 api:// 的链接调用循环
 	let apiReference = new Set();
 	let inner = async function (config_str) {
@@ -1578,42 +1569,12 @@ async function fetchConfig(config_str, needfetch = true, resolve = null, outTime
 					return;
 				}
 				let furl = str.slice(6);
-				let converSplit = furl.split("://");
-				if (converSplit.length < 2) {
-					furl = "https://" + converSplit[0];
-				}
-				if (apiReference.has(furl)) {
-					return;
-				}
-				apiReference.add(furl);
-
 				try {
-					const controller = new AbortController();
-					const id = setTimeout(() => controller.abort(), outTime);
-					const resp = await fetch(furl, {
-						method: 'get',
-						headers: {
-							'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
-							'User-Agent': 'Mozilla/5.0 Chrome/131.0.0.0'
-						},
-						signal: controller.signal,
-					}).finally(() => {
-						clearTimeout(id);
-					}).catch(error => {
-						if (error.name === 'AbortError') {
-							console.warn('请求超时: ' + furl, error);
-						}
-						throw error;
-					});
-					if (!resp.ok) {
-						console.warn('获取地址时出错: ' + furl, resp.status, resp.statusText);
-						return; // 如果有错误，直接返回
-					}
-
+					let resp = await fetchUrl(furl, outTime, apiReference);
 					// 回调处理文件有 api://  的链接
-					return inner(await resp.text());
+					return inner(resp);
 				} catch (err) {
-					console.error('获取地址时出错: ' + str, err);
+					console.error('获取地址时出错: ' + str, err.message);
 					return; // 如果有错误，直接返回
 				}
 			}
@@ -1625,16 +1586,10 @@ async function fetchConfig(config_str, needfetch = true, resolve = null, outTime
 	return inner(config_str);
 }
 
-/**
- * 
- * @param {*} add 
- * @returns 
- */
 async function getReProxys(add, onlyTls) {
 	if (!add || (add = add.trim()).length == 0) {
 		return [];
 	}
-
 	let ips = await fetchConfig(add);
 
 	return parseAddrLinks(ips, onlyTls);
@@ -1645,18 +1600,16 @@ async function getReProxysFromCsv(cvs, onlyTls, DLS) {
 		return [];
 	}
 
-	// csv 数据太多，一次只获取符合条件的前16条
-	const MAXROW = 16;
-	cvs = cvs.split(",").map(list => "api://" + list.trim()).join(',');
+	// csv 数据太多，默认是排序的，每个CVS表格只获取符合条件的前16条
+	const MAXROW = 8;
+	let addresses = [];
 
-	let handler = function (lines) {
+	const handleCVS = function (lines) {
 		lines = lines.split('\n').map(txt => txt.trim()).filter(Boolean);
 		if (!lines || lines.length === 0) {
 			console.warn('CSV文件为空: ', cvs);
 			return;
 		}
-
-		let addresses = [];
 		let header = null;
 		let huf = false;	// 标记header头是否重新更新
 		let ipColIndex = -1;
@@ -1666,9 +1619,9 @@ async function getReProxysFromCsv(cvs, onlyTls, DLS) {
 		let cityColIndex = -1;
 		let speedColIndex = -1;
 		let speedUnits = ""; // cvs 测速单位
-		let maxrow = MAXROW;
+		let maxrow = 0;
 
-		for (let i = 0; i < lines.length && maxrow > 0; i++) {
+		for (let i = 0; i < lines.length; i++) {
 			if (lines[i].length === 0) {
 				continue;
 			}
@@ -1683,9 +1636,10 @@ async function getReProxysFromCsv(cvs, onlyTls, DLS) {
 
 			if (huf) {
 				huf = false;
+				maxrow = MAXROW;
 				ipColIndex = header.findIndex(str => str.includes('ip'));
 				portColIndex = header.findIndex(str => str.indexOf('端口') !== -1 || str.indexOf('port') !== -1);
-				
+
 				if (ipColIndex === -1 || portColIndex === -1) {
 					console.warn('CSV文件缺少必需的字段');
 					return;
@@ -1707,6 +1661,9 @@ async function getReProxysFromCsv(cvs, onlyTls, DLS) {
 				continue;
 			}
 
+			if (maxrow < 1) {
+				continue;
+			}
 			let columns = lines[i].split(',').map(txt => txt.trim());
 			if (columns.length !== header.length) {
 				console.warn('CSV文件数据错乱');
@@ -1743,14 +1700,24 @@ async function getReProxysFromCsv(cvs, onlyTls, DLS) {
 			addresses.push(address);
 			maxrow--;
 		}
-
-		return addresses;
 	}
 
-	return fetchConfig(cvs, true, handler);
+	let cvsUrls = cvs.split(/[,\n]/);
+	// 避免 api:// 的链接调用循环
+	let apiReference = new Set();
+	cvsUrls.forEach(async furl => {
+		try {
+			let resp = await fetchUrl(furl, 6000, apiReference);
+			handleCVS(resp);
+		} catch (err) {
+			console.error('获取地址时出错: ' + furl, err.message);
+			return []; // 如果有错误，直接返回
+		}
+	});
+
+	return addresses;
 }
 
-// @ts-ignore
 async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDomain, onlyTls = true) {
 	if (!generStr || (generStr = generStr.trim()).length == 0) {
 		return [];
@@ -1771,29 +1738,18 @@ async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDo
 
 		let url = `${sub}/sub?host=${randomDomain}&uuid=${fakeUserID}&type=ws&path=${encodeURIComponent("/?ed=2560")}`;
 		try {
-			let resp = await fetch(url, {
-				method: 'get',
-				headers: {
-					'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
-					'User-Agent': 'v2ray.xray'
-				}
-			});
-			if (!resp.ok) {
-				console.warn('获取ProxyGener地址时出错: ' + url, resp.status, resp.statusText);
-				return; // 如果有错误，直接返回
-			}
 			// 可能是base64编码串
-			let encodeStr = await resp.text();
+			let encodeStr = await fetchUrl(url, 8000, null, 'v2ray.xray');
 			// 将假数据还原
+			// @ts-ignore
 			encodeStr = (isBase64(encodeStr) ? atob(encodeStr) : encodeStr).replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(randomDomain, 'gm'), host);
-
+			// @ts-ignore
 			return encodeStr.split('\n');
 		} catch (err) {
 			console.error('解析ProxyGener地址时出错: ' + url, err);
 			return; // 如果有错误，直接返回
 		}
 	}
-
 	let ips = await fetchConfig(generStr, true, fetch_sub);
 
 	return parseAddrLinks(ips, onlyTls, true);
@@ -1841,6 +1797,52 @@ function parseAddrLinks(ips, onlyTls, isVess = false) {
 
 		return [[address, port, tag]];
 	}).filter(Boolean);
+}
+
+/**
+ * Url fetch wrapper
+ * @param {string} furl
+ * @param {number} [outTime=5000]
+ * @param {Set} [apiAvoidDupRef=null]
+ * @param {string} [UA="Mozilla/5.0 Chrome/131.0.0.0"]
+ * @param {boolean} [respText=true]
+ * @returns {Promise<string | Response>}
+ */
+async function fetchUrl(furl, outTime = 5000, apiAvoidDupRef = null, UA = "Mozilla/5.0 Chrome/131.0.0.0", respText = true) {
+	let converSplit = furl.split("://");
+	if (converSplit.length < 2) {
+		furl = "https://" + converSplit[0];
+	}
+	// 避免的链接调用循环
+	if (apiAvoidDupRef) {
+		if (apiAvoidDupRef.has(furl)) {
+			throw new Error("URL duplicate request: " + furl);
+		}
+		apiAvoidDupRef.add(furl);
+	}
+
+	const controller = new AbortController();
+	const id = setTimeout(() => controller.abort(), outTime);
+	const resp = await fetch(furl, {
+		method: 'get',
+		headers: {
+			'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
+			'User-Agent': UA
+		},
+		signal: controller.signal,
+	}).finally(() => {
+		clearTimeout(id);
+	}).catch(error => {
+		if (error.name === 'AbortError') {
+			throw new Error(`请求超时 ${outTime}ms: ${furl}`);
+		}
+		throw error;
+	});
+	if (!resp.ok) {
+		throw resp.statusText;
+	}
+
+	return respText ? resp.text() : resp;
 }
 
 function generateRandomUUID() {
