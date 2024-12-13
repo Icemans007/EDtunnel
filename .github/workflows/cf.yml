@@ -97,11 +97,21 @@ jobs:
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
           # input overrides env-defaults, regardless
           environment: ${{ env.WORKERS_ENV }}
+          vars: |
+            UUID
+            PROXYIP
+            ADD
+            CF_PROXY_GENER
+            CVS
+            DLS
+            ACL4SSR_CONFIG
+            SUBCONVER
         env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          GIT_COMMIT_ID: ${{ env.GIT_REF }}
+          # CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          # GIT_COMMIT_ID: ${{ env.GIT_REF }}
           UUID: ${{ vars.UUID }}
           PROXYIP: ${{ vars.PROXYIP }}
           ADD: ${{ vars.ADD }}

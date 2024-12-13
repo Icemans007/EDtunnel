@@ -1247,10 +1247,10 @@ function getConfig(userID, hostName) {
       <p><a href="https://github.com/Icemans007/${atob(ed)}" target="_blank" style="color: #00ff00;">${atob(ed)} - https://github.com/Icemans007/${atob(ed)}</a></p>
       <div style="clear: both;"></div>
       <div class="btn-group">
-        <a href="${sublink}" class="btn" target="_blank"><i class="fas fa-link"></i>自适应订阅（推荐！）</a>
+        <a href="${sublink}" class="btn" target="_blank"><i class="fas fa-star"></i>自适应订阅（推荐！）</a>
         <a href="clash://install-config?url=${encodeURIComponent(sublink + "?clash")}" class="btn" target="_blank"><i class="fas fa-bolt"></i> Clash-Meta 订阅</a>
-        <a href="${sublink}?clash" class="btn" target="_blank"><i class="fas fa-bolt"></i> Clash Link</a>
-        <a href="${sublink}?singbox" class="btn" target="_blank"><i class="fas fa-star"></i> Singbox Link</a>
+        <a href="${sublink}?clash" class="btn" target="_blank"><i class="fas fa-link"></i> Clash Link</a>
+        <a href="${sublink}?singbox" class="btn" target="_blank"><i class="fas fa-link"></i> Singbox Link</a>
       </div>
       <div class="subscription-info">
         <h3>选项说明:</h3>
@@ -1625,7 +1625,7 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 8) {
 			if (lines[i].length === 0) {
 				continue;
 			}
-			if (lines[i].toLowerCase().includes('ip')) {
+			if (lines[i].includes('地址') && lines[i].includes('速度')) {
 				header = lines[i].toLowerCase().split(',').map(txt => txt.trim());
 				huf = true;
 			}
@@ -1637,17 +1637,17 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 8) {
 			if (huf) {
 				huf = false;
 				maxrow = MAXROW;
-				ipColIndex = header.findIndex(str => str.includes('ip'));
-				portColIndex = header.findIndex(str => str.indexOf('端口') !== -1 || str.indexOf('port') !== -1);
-				if (ipColIndex === -1 || portColIndex === -1) {
+				ipColIndex = header.findIndex(str => str.startsWith('ip') && str.includes('地址'));
+				portColIndex = header.findIndex(str => str.indexOf('端口') !== -1);
+				if (ipColIndex === -1) {
 					console.warn('CSV文件缺少必需的字段');
 					return;
 				}
 
 				tlsColIndex = header.indexOf('tls');
-				countryColIndex = header.findIndex(str => str.indexOf('国家') !== -1 || str.indexOf('country') !== -1);
-				cityColIndex = header.findIndex(str => str.indexOf('城市') !== -1 || str.indexOf('city') !== -1);
-				speedColIndex = header.findLastIndex(item => item.includes("速度") || item.includes("speed"));
+				countryColIndex = header.findIndex(str => str.indexOf('国家') !== -1);
+				cityColIndex = header.findIndex(str => str.indexOf('城市') !== -1);
+				speedColIndex = header.findLastIndex(item => item.includes("速度"));
 				speedUnits = "";	// 换了header, 单位重新计算
 
 				if (header[speedColIndex]?.includes('kb')) {
@@ -1690,12 +1690,18 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 8) {
 				}
 			}
 
+			// 端口
+			let port = columns[portColIndex] || '443';
+			if (!columns[portColIndex] && columns[tlsColIndex]?.toLowerCase() !== 'true') {
+				port = '80';
+			}
+
 			let tag = "";
 			if (columns[countryColIndex]) tag += columns[countryColIndex] + " ";
 			if (columns[cityColIndex]) tag += columns[cityColIndex];
 			if (tag.length === 0) tag += columns[ipColIndex];
 
-			let address = [columns[ipColIndex], columns[portColIndex], tag];
+			let address = [columns[ipColIndex], port, tag];
 			addresses.push(address);
 			maxrow--;
 		}
