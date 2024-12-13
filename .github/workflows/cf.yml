@@ -110,8 +110,6 @@ jobs:
             ACL4SSR_CONFIG
             SUBCONVER
         env:
-          # CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          # GIT_COMMIT_ID: ${{ env.GIT_REF }}
           UUID: ${{ vars.UUID }}
           PROXYIP: ${{ vars.PROXYIP }}
           ADD: ${{ vars.ADD }}
