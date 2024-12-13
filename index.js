@@ -181,7 +181,7 @@ function processProxyip(url, PROXYIP, host, fetch = false) {
 	}
 	else if (PROXYIP) {
 		// const proxyAddresses = await fetchConfig(PROXYIP, fetch);
-		const proxyAddresses = PROXYIP.trim().split(/[\s,]+/).filter(addr.charAt(0) !== "#");
+		const proxyAddresses = PROXYIP.trim().split(/[\s,]+/).filter(addr => addr.charAt(0) !== "#");
 		const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
 		[iproxyIP, iproxyPort = '443'] = selectedProxy.split(':');
 	}
@@ -1601,7 +1601,7 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 8) {
 	}
 
 	// csv 数据太多，默认是排序的，每个CVS表格只获取符合条件的前8条
-	const [DLS = 8, MAXROW = 8] = String(DLSstr).split(":").map(d => isFinite(d) ? d : undefined);
+	const [DLS = 8, MAXROW = 8] = String(DLSstr).split(":").map(d => isFinite(+d) ? +d : undefined);
 	let addresses = [];
 
 	const handleCVS = function (lines) {
