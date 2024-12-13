@@ -70,8 +70,8 @@ export default {
 			// @ts-ignore
 			const { UUID, PROXYIP, SOCKS5, SOCKS5_RELAY, ADD, CF_PROXY_GENER, CVS, DLS, SUBCONVER, ACL4SSR_CONFIG, ONLYTLS = true } = env;
 
-			userID = UUID?.replaceAll('\n', ',') || userID;
-			if (userID.split(',').some(uuid => !isValidUUID(uuid.trim()))) {
+			userID = UUID?.trim().replace(/[\s,]+/g, ',') || userID;
+			if (userID.split(',').some(uuid => !isValidUUID(uuid))) {
 				throw new Error('uuid is not valid');
 			}
 
@@ -83,7 +83,7 @@ export default {
 			if (socks5Address) {
 				try {
 					// Split SOCKS5 into an array of addresses
-					const socks5Addresses = socks5Address.split(/[,\n]/).map(addr => addr.trim());
+					const socks5Addresses = socks5Address.trim().split(/[,\s]+/);
 					// Randomly select one SOCKS5 address
 					const selectedSocks5 = socks5Addresses[Math.floor(Math.random() * socks5Addresses.length)];
 					parsedSocks5Address = socks5AddressParser(selectedSocks5);
@@ -104,7 +104,7 @@ export default {
 			if (request.headers.get('Upgrade') !== 'websocket') {
 
 				let pathname = url.pathname.toLowerCase().trim();
-				let userID_Path = userID.split(',').find(uuid => uuid.trim() === pathname.slice(1)) || userID.split(',')[0];
+				let userID_Path = userID.split(',').find(uuid => uuid === pathname.slice(1)) || userID.split(',')[0];
 
 				switch (true) {
 					case pathname === '/':
@@ -174,14 +174,14 @@ function processProxyip(url, PROXYIP, host, fetch = false) {
 	let requestProxyip = url.searchParams.get("proxyip") || url.searchParams.get("pyip");
 	if (requestProxyip) {
 		// Split PROXYIP into an array of proxy addresses
-		const proxyAddresses = requestProxyip.split(',').map(addr => addr.trim()).filter(Boolean);
+		const proxyAddresses = requestProxyip.trim().split(/[,\s]+/);
 		// Randomly select one proxy address
 		const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
 		[iproxyIP, iproxyPort = '443'] = selectedProxy.split(':');
 	}
 	else if (PROXYIP) {
 		// const proxyAddresses = await fetchConfig(PROXYIP, fetch);
-		const proxyAddresses = PROXYIP.split(/[\n,]/).map(addr => addr.trim()).filter(addr => Boolean(addr) && addr.charAt(0) !== "#");
+		const proxyAddresses = PROXYIP.trim().split(/[\s,]+/).filter(addr.charAt(0) !== "#");
 		const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
 		[iproxyIP, iproxyPort = '443'] = selectedProxy.split(':');
 	}
@@ -1478,7 +1478,7 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 	let addresses = [];
 	// CF IP列表
 	if (url.searchParams.has("cfproxylist")) {
-		ADD = url.searchParams.get("cfproxylist").trim().split(",").map(list => "api://" + list.trim()).join(',');
+		ADD = url.searchParams.get("cfproxylist").trim().split(/[,\s]+/).map(list => "api://" + list).join(',');
 	}
 	if (ADD) {
 		let res = await getReProxys(ADD, onlyTls);
@@ -1560,7 +1560,7 @@ async function fetchConfig(config_str, needfetch = true, resolve = null, outTime
 	// 避免 api:// 的链接调用循环
 	let apiReference = new Set();
 	let inner = async function (config_str) {
-		return (await Promise.all(config_str.split(/[\n,]/).map(v => v.trim()).filter(Boolean).map(async str => {
+		return (await Promise.all(config_str.trim().split(/[\n,]+/).map(v => v.trim()).map(async str => {
 			// 前面是# 号的是忽略的配置
 			if (str.charAt(0) === '#') return;
 
@@ -1707,7 +1707,7 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 8) {
 		}
 	}
 
-	let cvsUrls = cvs.split(/[,\n]/);
+	let cvsUrls = cvs.split(/[,\s]+/);
 	// 避免 api:// 的链接调用循环
 	let apiReference = new Set();
 	for (let furl of cvsUrls) {
