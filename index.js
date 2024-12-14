@@ -168,22 +168,17 @@ export default {
  * @param {*} PROXYIP
  * @param {*} host
  */
-function processProxyip(url, PROXYIP, host, fetch = false) {
-
+function processProxyip(url, PROXYIP, fetch = false) {
 	let iproxyIP, iproxyPort;
 	let requestProxyip = url.searchParams.get("proxyip") || url.searchParams.get("pyip");
-	if (requestProxyip) {
+
+	if (requestProxyip || PROXYIP) {
 		// Split PROXYIP into an array of proxy addresses
-		const proxyAddresses = requestProxyip.trim().split(/[,\s]+/);
+		// const proxyAddresses = await fetchConfig(PROXYIP, fetch);
+		const proxyAddresses = (requestProxyip || PROXYIP).trim().split(/[,\s]+/).filter(addr => addr.charAt(0) !== "#");
 		// Randomly select one proxy address
 		const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
-		[iproxyIP, iproxyPort = '443'] = selectedProxy.split(':');
-	}
-	else if (PROXYIP) {
-		// const proxyAddresses = await fetchConfig(PROXYIP, fetch);
-		const proxyAddresses = PROXYIP.trim().split(/[\s,]+/).filter(addr => addr.charAt(0) !== "#");
-		const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
-		[iproxyIP, iproxyPort = '443'] = selectedProxy.split(':');
+		[, iproxyIP, iproxyPort = '443'] = selectedProxy.match(/((?:[\w-]+\.)+[a-z]+|\d{1,3}(?:\.\d{1,3}){3}|\[[a-f0-9:]+\])(?::(\d+))?/i);
 	}
 	else {
 		iproxyIP = proxyIP;
