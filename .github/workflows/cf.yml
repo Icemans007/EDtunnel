@@ -22,6 +22,11 @@ on:
         default: 'main'
         required: true
 
+  workflow_run:
+    workflows: ["⚙️Obfuscate and Commit"]
+    types:
+      - completed
+
   push:
     # TODO: inputs.environment and inputs.commit
     branches:
