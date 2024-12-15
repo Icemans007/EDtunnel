@@ -1429,7 +1429,7 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 &config=${encodeURIComponent(subConverterMode)}&udp=true&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
 
 		try {
-			let response = await fetchUrl(ffetch, 8000, null, userAgent, false);
+			let response = await fetchUrl(ffetch, 16000, null, userAgent, false);
 			// 还原假信息为真
 			// @ts-ignore
 			return new Response((await response.text()).replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(randomDomain, 'gm'), host), {
@@ -1556,7 +1556,7 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 	});
 }
 
-async function fetchConfig(config_str, needfetch = true, resolve = null, outTime = 6000) {
+async function fetchConfig(config_str, needfetch = true, resolve = null, outTime = 8000) {
 	// 避免 api:// 的链接调用循环
 	let apiReference = new Set();
 	let inner = async function (config_str) {
@@ -1712,7 +1712,7 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 8) {
 	let apiReference = new Set();
 	for (let furl of cvsUrls) {
 		try {
-			let resp = await fetchUrl(furl, 6000, apiReference);
+			let resp = await fetchUrl(furl, 12000, apiReference);
 			handleCVS(resp);
 		} catch (err) {
 			console.error('获取地址时出错: ' + furl, err.message);
@@ -1744,7 +1744,7 @@ async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDo
 		let url = `${sub}/sub?host=${randomDomain}&uuid=${fakeUserID}&type=ws&path=${encodeURIComponent("/?ed=2560")}`;
 		try {
 			// 可能是base64编码串
-			let encodeStr = await fetchUrl(url, 8000, null, 'v2ray.xray');
+			let encodeStr = await fetchUrl(url, 12000, null, 'v2ray.xray');
 			// 将假数据还原
 			// @ts-ignore
 			encodeStr = (isBase64(encodeStr) ? atob(encodeStr) : encodeStr).replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(randomDomain, 'gm'), host);
@@ -1807,13 +1807,13 @@ function parseAddrLinks(ips, onlyTls, isVess = false) {
 /**
  * Url fetch wrapper
  * @param {string} furl
- * @param {number} [outTime=5000]
+ * @param {number} [outTime=0]
  * @param {Set} [apiAvoidDupRef=null]
  * @param {string} [UA="Mozilla/5.0 Chrome/131.0.0.0"]
  * @param {boolean} [respText=true]
  * @returns {Promise<string | Response>}
  */
-async function fetchUrl(furl, outTime = 5000, apiAvoidDupRef = null, UA = "Mozilla/5.0 Chrome/131.0.0.0", respText = true) {
+async function fetchUrl(furl, outTime = 0, apiAvoidDupRef = null, UA = "Mozilla/5.0 Chrome/131.0.0.0", respText = true) {
 	let converSplit = furl.split("://");
 	if (converSplit.length < 2) {
 		furl = "https://" + converSplit[0];
@@ -1826,17 +1826,20 @@ async function fetchUrl(furl, outTime = 5000, apiAvoidDupRef = null, UA = "Mozil
 		apiAvoidDupRef.add(furl);
 	}
 
-	const controller = new AbortController();
-	const id = setTimeout(() => controller.abort(), outTime);
+	let abortc = null, id = null;
+	if (typeof outTime === "number" && outTime > 0) {
+		abortc = new AbortController();
+		id = setTimeout(() => abortc.abort(), outTime);
+	}
 	const resp = await fetch(furl, {
 		method: 'get',
 		headers: {
 			'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
 			'User-Agent': UA
 		},
-		signal: controller.signal,
+		signal: abortc?.signal,
 	}).finally(() => {
-		clearTimeout(id);
+		id || clearTimeout(id);
 	}).catch(error => {
 		if (error.name === 'AbortError') {
 			throw new Error(`请求超时 ${outTime}ms: ${furl}`);
