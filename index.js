@@ -178,7 +178,12 @@ function processProxyip(url, PROXYIP, fetch = false) {
 		const proxyAddresses = (requestProxyip || PROXYIP).trim().split(/[,\s]+/).filter(addr => addr.charAt(0) !== "#");
 		// Randomly select one proxy address
 		const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
-		[, iproxyIP, iproxyPort = '443'] = selectedProxy.match(/((?:[\w-]+\.)+[a-z]+|\d{1,3}(?:\.\d{1,3}){3}|\[[a-f0-9:]+\])(?::(\d+))?/i);
+		if (!selectedProxy.includes('[')) {
+			[iproxyIP, iproxyPort = '443'] = selectedProxy.split(':');
+		}
+		else {
+			[, iproxyIP, iproxyPort = '443'] = selectedProxy.match(/(\[[a-f0-9:]+\])(?::(\d+))?/i);
+		}
 	}
 	else {
 		iproxyIP = proxyIP;
@@ -1633,15 +1638,15 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 8) {
 				huf = false;
 				maxrow = MAXROW;
 				ipColIndex = header.findIndex(str => str.startsWith('ip') && str.includes('地址'));
-				portColIndex = header.findIndex(str => str.indexOf('端口') !== -1);
+				portColIndex = header.findIndex(str => str.includes('端口'));
 				if (ipColIndex === -1) {
 					console.warn('CSV文件缺少必需的字段');
 					return;
 				}
 
 				tlsColIndex = header.indexOf('tls');
-				countryColIndex = header.findIndex(str => str.indexOf('国家') !== -1);
-				cityColIndex = header.findIndex(str => str.indexOf('城市') !== -1);
+				countryColIndex = header.findIndex(str => str.includes('国家'));
+				cityColIndex = header.findIndex(str => str.includes('城市'));
 				speedColIndex = header.findLastIndex(item => item.includes("速度"));
 				speedUnits = "";	// 换了header, 单位重新计算
 
@@ -1759,8 +1764,8 @@ function parseAddrLinks(ips, onlyTls, isVess = false) {
 	// abc.com:端口#节点名
 	// 123.123.123.123:端口#节点名
 	// [abc:1234::1]:端口#节点名
-	const urlReg = /^((?:https?:\/\/)?(?:[\w-]+\.)+[a-z]+|\d{1,3}(?:\.\d{1,3}){3}|\[[a-f0-9:]+\])(?::(\d+))?(?:#([^#\n]+)$)?/i;
-	const vessReg = new RegExp(`^${atob(pt)}://[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}${atob(at)}((?:[\\w-]+\\.)+[a-z]+|\\d{1,3}(?:\\.\\d{1,3}){3}|\\[[a-f0-9:]+\\]):(\\d+)\\?[^#]+(?:#(.+)$)?`, "i");
+	const urlReg = /^((?:https?:\/\/)?(?:[\w-]+\.)+[a-z-]+|\d{1,3}(?:\.\d{1,3}){3}|\[[a-f0-9:]+\])(?::(\d+))?(?:#(.+)$)?/i;
+	const vessReg = new RegExp(`^${atob(pt)}://[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}${atob(at)}((?:[\\w-]+\\.)+[a-z-]+|\\d{1,3}(?:\\.\\d{1,3}){3}|\\[[a-f0-9:]+\\]):(\\d+)\\?[^#]+(?:#(.+)$)?`, "i");
 
 	return ips.flatMap(ip => {
 		let regExp = urlReg;
