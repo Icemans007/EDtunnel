@@ -1399,8 +1399,8 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 	let isSubReq = url.pathname.toLowerCase().startsWith("/convertersubrequest");
 
 	if ((target === "clash" || target === "singbox") && !isSubReq) {
-		if (url.searchParams.get("subconverter")?.trim()) {
-			subconverter = url.searchParams.get("subconverter");
+		if (url.searchParams.has("subconverter")) {
+			subconverter = url.searchParams.get("subconverter")?.trim();
 		}
 
 		if (!subconverter) {
@@ -1839,7 +1839,7 @@ async function fetchUrl(furl, outTime = 0, apiAvoidDupRef = null, UA = "Mozilla/
 		},
 		signal: abortc?.signal,
 	}).finally(() => {
-		id || clearTimeout(id);
+		id && clearTimeout(id);
 	}).catch(error => {
 		if (error.name === 'AbortError') {
 			throw new Error(`请求超时 ${outTime}ms: ${furl}`);
