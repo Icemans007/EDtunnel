@@ -134,7 +134,7 @@ export default {
 							onlyTls
 						};
 						return GenSub(args);
-					case `/bestip/${userID_Path}`:
+					case pathname === `/bestip/${userID_Path}`:
 						   return fetch(`https://bestip.06151953.xyz/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
 					default:
 						return new Response(`<html>
@@ -1635,7 +1635,8 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 8) {
 			if (lines[i].length === 0) {
 				continue;
 			}
-			if (lines[i].includes('地址') && lines[i].includes('速度')) {
+			if ((lines[i].includes('地址') || lines[i].toLowerCase().startsWith('ip'))
+			 && (lines[i].includes('端口') || lines[i].toLowerCase().includes('port'))) {
 				header = lines[i].toLowerCase().split(',').map(txt => txt.trim());
 				huf = true;
 			}
@@ -1647,8 +1648,8 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 8) {
 			if (huf) {
 				huf = false;
 				maxrow = MAXROW;
-				ipColIndex = header.findIndex(str => str.startsWith('ip') && str.includes('地址'));
-				portColIndex = header.findIndex(str => str.includes('端口'));
+				ipColIndex = header.findIndex(str => str.startsWith('ip') || str.includes('地址'));
+				portColIndex = header.findIndex(str => str.includes('端口') || str.startsWith('port'));
 				if (ipColIndex === -1) {
 					console.warn('CSV文件缺少必需的字段');
 					return;
@@ -1656,8 +1657,8 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 8) {
 
 				tlsColIndex = header.indexOf('tls');
 				countryColIndex = header.findIndex(str => str.includes('国家'));
-				cityColIndex = header.findIndex(str => str.includes('城市'));
-				speedColIndex = header.findLastIndex(item => item.includes("速度"));
+				cityColIndex = header.findIndex(str => str.includes('城市') || str.includes('city'));
+				speedColIndex = header.findLastIndex(item => item.includes("速度") || item.includes("speed"));
 				speedUnits = "";	// 换了header, 单位重新计算
 
 				if (header[speedColIndex]?.includes('kb')) {
