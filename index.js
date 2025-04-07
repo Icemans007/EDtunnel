@@ -134,8 +134,8 @@ export default {
 							onlyTls
 						};
 						return GenSub(args);
-					// case `/bestip/${userID_Path}`:
-					// 	   return fetch(`https://sub.xf.free.hr/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
+					case `/bestip/${userID_Path}`:
+						   return fetch(`https://bestip.06151953.xyz/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
 					default:
 						return new Response(`<html>
 <head><title>${host} - Cloud Drive</title></head>
@@ -144,6 +144,10 @@ export default {
 <hr><center>nginx</center>
 </body>
 </html>
+<!-- a padding to disable MSIE and Chrome friendly error page -->
+<!-- a padding to disable MSIE and Chrome friendly error page -->
+<!-- a padding to disable MSIE and Chrome friendly error page -->
+<!-- a padding to disable MSIE and Chrome friendly error page -->
 <!-- a padding to disable MSIE and Chrome friendly error page -->`, {
 							status: 404,
 							headers: { "Content-Type": "text/html; charset=utf-8" }
@@ -438,6 +442,10 @@ function handleDefaultPath(url, request) {
 		  </script>
 	  </body>
 	  </html>
+	  <!-- a padding to disable MSIE and Chrome friendly error page -->
+	  <!-- a padding to disable MSIE and Chrome friendly error page -->
+	  <!-- a padding to disable MSIE and Chrome friendly error page -->
+	  <!-- a padding to disable MSIE and Chrome friendly error page -->
 	  <!-- a padding to disable MSIE and Chrome friendly error page -->
 	`;
 
@@ -1116,7 +1124,7 @@ function getConfig(userID, hostName) {
 
 	// Prepare output string for userID
 	const sublink = `https://${hostName}/${userID}`;
-	// const subbestip = `https://${hostName}/bestip/${userID}`;
+	const subbestip = `https://${hostName}/bestip/${userID}`;
 	// HTML Head with CSS and FontAwesome library
 	const htmlHead = `
   <head>
@@ -1251,6 +1259,7 @@ function getConfig(userID, hostName) {
         <a href="clash://install-config?url=${encodeURIComponent(sublink + "?clash")}" class="btn" target="_blank"><i class="fas fa-bolt"></i> Clash-Meta 订阅</a>
         <a href="${sublink}?clash" class="btn" target="_blank"><i class="fas fa-link"></i> Clash Link</a>
         <a href="${sublink}?singbox" class="btn" target="_blank"><i class="fas fa-link"></i> Singbox Link</a>
+		<a href="${subbestip}" class="btn" target="_blank"><i class="fas fa-star"></i> Best IP Subscription</a>
       </div>
       <div class="subscription-info">
         <h3>选项说明:</h3>
@@ -1259,6 +1268,7 @@ function getConfig(userID, hostName) {
           <li><strong>Clash-Meta 订阅:</strong> 打开具有预配置设置的 Clash 客户端。最适合移动设备上的 Clash 用户。</li>
           <li><strong>Clash-Meta Link:</strong> 用于将 Clash 配置转换为 Clash 格式的 Web 链接。对于手动导入或故障排除很有用。</li>
           <li><strong>Singbox Link:</strong> 用于将 Singbox 的 Web 链接。对于手动导入或故障排除很有用。</li>
+		  <li><strong>Best IP Subscription:</strong> Provides a curated list of optimal server IPs for many <b>different countries</b>.</li>
         </ul>
         <p>选择最适合您的客户和需求的选项。</p>
       </div>
