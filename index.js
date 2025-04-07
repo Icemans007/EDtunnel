@@ -1258,7 +1258,7 @@ function getConfig(userID, hostName) {
       <p><a href="https://github.com/Icemans007/${atob(ed)}" target="_blank" style="color: #00ff00;">${atob(ed)} - https://github.com/Icemans007/${atob(ed)}</a></p>
       <div style="clear: both;"></div>
       <div class="btn-group">
-        <a href="${sublink}" class="btn" target="_blank"><i class="fas fa-star"></i>自适应订阅（推荐！）</a>
+        <a href="javascript: void(0)" onclick="copyToClipboard('${sublink}')" class="btn"><i class="fas fa-star"></i>自适应订阅（推荐！）</a>
         <a href="clash://install-config?url=${encodeURIComponent(sublink + "?clash")}" class="btn" target="_blank"><i class="fas fa-bolt"></i> Clash-Meta 订阅</a>
         <a href="${sublink}?clash" class="btn" target="_blank"><i class="fas fa-link"></i> Clash Link</a>
         <a href="${sublink}?singbox" class="btn" target="_blank"><i class="fas fa-link"></i> Singbox Link</a>
@@ -1344,12 +1344,12 @@ function getConfig(userID, hostName) {
         <h3>${atob(pt)} 配置</h3>
 		<div class="code-container">
 		  <pre><code>${codehtml(vessPart)}</code></pre>
-		  <button class="btn copy-btn" onclick='copyToClipboard("${btoa(codehtml(vessPart))}")'><i class="fas fa-copy"></i> 复制</button>
+		  <button class="btn copy-btn" onclick='copyToClipboard("${btoa(codehtml(vessPart))}", true)'><i class="fas fa-copy"></i> 复制</button>
 		</div>
         <h3>clash 配置</h3>
 		<div class="code-container">
 		  <pre><code>${codehtml(crashPart)}</code></pre>
-		  <button class="btn copy-btn" onclick='copyToClipboard("${btoa(codehtml(crashPart))}")'><i class="fas fa-copy"></i> 复制</button>
+		  <button class="btn copy-btn" onclick='copyToClipboard("${btoa(codehtml(crashPart))}", true)'><i class="fas fa-copy"></i> 复制</button>
 		</div>
       </div>
     `;
@@ -1363,8 +1363,8 @@ function getConfig(userID, hostName) {
     ${configOutput()}
   </body>
   <script>
-    function copyToClipboard(text) {
-      navigator.clipboard.writeText(atob(text))
+    function copyToClipboard(text, conver=false) {
+      navigator.clipboard.writeText(conver ? atob(text) : text)
         .then(() => {
           alert("Copied to clipboard");
         })
