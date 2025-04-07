@@ -104,7 +104,10 @@ export default {
 			if (request.headers.get('Upgrade') !== 'websocket') {
 
 				let pathname = url.pathname.toLowerCase().trim();
-				let userID_Path = userID.split(',').find(uuid => uuid === pathname.slice(1)) || userID.split(',')[0];
+				if (pathname.length > 1 && pathname.slice(-1) === '/') {
+					pathname = pathname.slice(0, -1);
+				}
+				let userID_Path = userID.split(',').find(uuid => pathname.includes(uuid)) || userID.split(',')[0];
 
 				switch (true) {
 					case pathname === '/':
@@ -135,7 +138,7 @@ export default {
 						};
 						return GenSub(args);
 					case pathname === `/bestip/${userID_Path}`:
-						   return fetch(`https://bestip.06151953.xyz/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
+						return fetch(`https://bestip.06151953.xyz/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
 					default:
 						return new Response(`<html>
 <head><title>${host} - Cloud Drive</title></head>
@@ -1396,7 +1399,9 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 		target = "singbox";
 	}
 
-	if (!target && userAgent.toLowerCase().includes('mozilla')) {
+	// 是否是第三方后端订阅转换服务请求 https://${host}/convertersubrequest
+	let isSubReq = url.pathname.toLowerCase().startsWith("/convertersubrequest");
+	if (!target && userAgent.toLowerCase().includes('mozilla') && !isSubReq) {
 		return new Response(getConfig(userID, host), {
 			status: 200,
 			headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -1405,8 +1410,6 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 
 	let fakeUserID = generateRandomUUID();
 	let randomDomain = generateRandomStr(12) + [".net", ".com", ".org", ".edu", ".cn", ".jp", ".xyz", ".us"].at(Math.random() * 8 | 0);
-	// 是否是第三方后端订阅转换服务请求 https://${host}/convertersubrequest
-	let isSubReq = url.pathname.toLowerCase().startsWith("/convertersubrequest");
 
 	if ((target === "clash" || target === "singbox") && !isSubReq) {
 		if (url.searchParams.has("subconverter")) {
@@ -1636,7 +1639,7 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 8) {
 				continue;
 			}
 			if ((lines[i].includes('地址') || lines[i].toLowerCase().startsWith('ip'))
-			 && (lines[i].includes('端口') || lines[i].toLowerCase().includes('port'))) {
+				&& (lines[i].includes('端口') || lines[i].toLowerCase().includes('port'))) {
 				header = lines[i].toLowerCase().split(',').map(txt => txt.trim());
 				huf = true;
 			}
