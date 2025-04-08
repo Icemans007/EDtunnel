@@ -1412,9 +1412,9 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 	}
 
 	let fakeUserID = generateRandomUUID();
-	let randomDomain = generateRandomStr(12) + [".net", ".com", ".org", ".edu", ".cn", ".jp", ".xyz", ".us"].at(Math.random() * 8 | 0);
+	let fakeHost = generateRandomStr(12) + [".net", ".com", ".org", ".edu", ".cn", ".jp", ".xyz", ".us"].at(Math.random() * 8 | 0);
 
-	if ((target === "clash" || target === "singbox") && !isSubReq) {
+	if (!isSubReq && (target === "clash" || target === "singbox")) {
 		if (url.searchParams.has("subconverter")) {
 			subconverter = url.searchParams.get("subconverter")?.trim();
 		}
@@ -1435,12 +1435,12 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 			subconverter = "http://" + subconverSplit[0];
 		}
 
-		// suburl token 是映射前后 fakeUserID randomDomain
+		// suburl token 是映射前后 fakeUserID fakeHost
 		let suburl = `https://${host}/convertersubrequest?`;
 		if (url.search.length > 0) {
 			suburl = `https://${host}/convertersubrequest${url.search}&`;
 		}
-		suburl += `token=${btoa(fakeUserID + "@" + randomDomain)}`;
+		suburl += `token=${btoa(fakeUserID + "@" + fakeHost)}`;
 		let ffetch = `${subconverter}/sub?target=${target}&url=${encodeURIComponent(suburl)}&insert=false\
 &config=${encodeURIComponent(subConverterMode)}&udp=true&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
 
@@ -1448,7 +1448,7 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 			let response = await fetchUrl(ffetch, 16000, null, userAgent, false);
 			// 还原假信息为真
 			// @ts-ignore
-			return new Response((await response.text()).replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(randomDomain, 'gm'), host), {
+			return new Response((await response.text()).replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host), {
 				// @ts-ignore
 				status: response.status,
 				// @ts-ignore
@@ -1488,7 +1488,7 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 			});
 		}
 
-		[fakeUserID, randomDomain] = token;
+		[fakeUserID, fakeHost] = token;
 	}
 
 	let addresses = [];
@@ -1525,7 +1525,7 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 		}
 	}
 	if (GENER) {
-		let res = await getReProxysFromGener(GENER, userID, host, fakeUserID, randomDomain, onlyTls);
+		let res = await getReProxysFromGener(GENER, fakeUserID, fakeHost, onlyTls);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
@@ -1547,17 +1547,24 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 		// url_arr[0] ==> address
 		// url_arr[1] ==> port
 		// url_arr[2] ==> tagname
-		// url_arr[3] ==> v less 完整链接,可能为 undefined
+		// url_arr[3] ==> v_less 完整链接,可能为undefined, 当不为undefined时，要按需（!isSubReq）将fakeUserID、fakeHost 还原
 		// 利用 uniqueAddr【address:port】去重
 		let uniqueAddr = url_arr[0] + ":" + url_arr[1];
 		let old = accMap.get(uniqueAddr);
 		if (!(old && [...decodeURIComponent(old[0])].length >= [...decodeURIComponent(url_arr[2])].length)) {
-
-			// 没有 url_arr[3] 的配置默认链接，且绑定proxyip
-			let vess = url_arr[3] || `${atob(pt)}://${userID}${atob(at)}${url_arr[0]}:${url_arr[1]}?encryption=none\
+			let vess = "";
+			if (!isSubReq) {
+				// 没有 url_arr[3] 的配置默认链接
+				vess = url_arr[3]?.replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host) ||
+				`${atob(pt)}://${userID}${atob(at)}${url_arr[0]}:${url_arr[1]}?encryption=none\
 &type=ws${onlyTls ? "&security=tls" : ""}&host=${host}&sni=${host}&path=${encodeURIComponent("/?ed=2560")}#${encodeURIComponent(url_arr[2])}`;
-			// 换成假数据
-			vess = !isSubReq ? vess : vess.replace(new RegExp(userID, 'gm'), fakeUserID).replace(new RegExp(host, 'gm'), randomDomain);
+			}
+			else {
+				// 没有 url_arr[3] 的配置默认链接
+				vess = url_arr[3] ||
+				`${atob(pt)}://${fakeUserID}${atob(at)}${url_arr[0]}:${url_arr[1]}?encryption=none\
+&type=ws${onlyTls ? "&security=tls" : ""}&host=${fakeHost}&sni=${fakeHost}&path=${encodeURIComponent("/?ed=2560")}#${encodeURIComponent(url_arr[2])}`;
+			}
 
 			// 相同 tagname 递增
 			let tag = "";
@@ -1746,7 +1753,7 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 8) {
 	return addresses;
 }
 
-async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDomain, onlyTls = true) {
+async function getReProxysFromGener(generStr, fakeUserID, fakeHost, onlyTls = true) {
 	if (!generStr || (generStr = generStr.trim()).length == 0) {
 		return [];
 	}
@@ -1764,13 +1771,13 @@ async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDo
 		}
 		generNum.add(sub);
 
-		let url = `${sub}/sub?host=${randomDomain}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2560")}`;
+		let url = `${sub}/sub?host=${fakeHost}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2560")}`;
 		try {
 			// 可能是base64编码串
 			let encodeStr = await fetchUrl(url, 12000, null, 'v2ray.xray');
-			// 将假数据还原
+			// 将Base64数据解码
 			// @ts-ignore
-			encodeStr = (isBase64(encodeStr) ? atob(encodeStr) : encodeStr).replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(randomDomain, 'gm'), host);
+			encodeStr = (isBase64(encodeStr) ? atob(encodeStr) : encodeStr);
 			// @ts-ignore
 			return encodeStr.split('\n');
 		} catch (err) {
