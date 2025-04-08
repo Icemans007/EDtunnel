@@ -109,20 +109,22 @@ jobs:
             UUID
             PROXYIP
             ADD
-            CF_PROXY_GENER
+            GENER
             CVS
             DLS
             ACL4SSR_CONFIG
             SUBCONVER
+            ONLYTLS
         env:
           UUID: ${{ vars.UUID }}
           PROXYIP: ${{ vars.PROXYIP }}
           ADD: ${{ vars.ADD }}
-          CF_PROXY_GENER: ${{ vars.CF_PROXY_GENER }}
+          GENER: ${{ vars.GENER }}
           CVS: ${{ vars.CVS }}
           DLS: ${{ vars.DLS }}
           ACL4SSR_CONFIG: ${{ vars.ACL4SSR_CONFIG }}
           SUBCONVER: ${{ vars.SUBCONVER }}
+          ONLYTLS: ${{ vars.ONLYTLS }}
 
       - name: 🎤 Notice
         run: |
