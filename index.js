@@ -1400,7 +1400,11 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 
 	// 是否是第三方后端订阅转换服务请求 https://${host}/convertersubrequest
 	let isSubReq = url.pathname.toLowerCase().startsWith("/convertersubrequest");
-	if (!target && userAgent.toLowerCase().includes('mozilla') && !isSubReq) {
+	let hasProxyParams = false;
+	if (url.searchParams.has("cfproxylist") || url.searchParams.has("cfproxycvs") || url.searchParams.has("cfproxygener")) {
+		hasProxyParams = true;
+	}
+	if (!target && !hasProxyParams && !isSubReq && userAgent.toLowerCase().includes('mozilla')) {
 		return new Response(getConfig(userID, host), {
 			status: 200,
 			headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -1489,7 +1493,7 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 
 	let addresses = [];
 
-	if (url.searchParams.has("cfproxylist") || url.searchParams.has("cfproxycvs") || url.searchParams.has("cfproxygener")) {
+	if (hasProxyParams) {
 		// CF IP列表
 		ADD = "";
 		// CVS CF代理表格
