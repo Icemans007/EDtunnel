@@ -68,7 +68,7 @@ export default {
 			const host = request.headers.get('Host');
 			const userAgent = request.headers.get('User-Agent')?.toLowerCase() || '';
 			// @ts-ignore
-			const { UUID, PROXYIP, SOCKS5, SOCKS5_RELAY, ADD, CF_PROXY_GENER, CVS, DLS, SUBCONVER, ACL4SSR_CONFIG, ONLYTLS = true } = env;
+			const { UUID, PROXYIP, SOCKS5, SOCKS5_RELAY } = env;
 
 			userID = UUID?.trim().replace(/[\s,]+/g, ',') || userID;
 			if (userID.split(',').some(uuid => !isValidUUID(uuid))) {
@@ -94,20 +94,13 @@ export default {
 				}
 			}
 
-			if (ONLYTLS) {
-				onlyTls = ONLYTLS;
-			}
-			if (host.includes('pages.dev')) {
-				onlyTls = true;
-			}
-
 			if (request.headers.get('Upgrade') !== 'websocket') {
 
 				let pathname = url.pathname.toLowerCase().trim();
 				if (pathname.length > 1 && pathname.slice(-1) === '/') {
 					pathname = pathname.slice(0, -1);
 				}
-				let userID_Path = userID.split(',').find(uuid => pathname.includes(uuid)) || userID.split(',')[0];
+				let userID_Path = userID.split(',').find(uuid => pathname.includes(uuid)) || "";
 
 				switch (true) {
 					case pathname === '/':
@@ -122,23 +115,18 @@ export default {
 						});
 					case pathname === '/convertersubrequest':
 					case pathname === `/${userID_Path}`:
-						let args = {
+						const args = {
 							userID: userID_Path,
 							host,
 							url,
 							userAgent,
-							PROXYIP,
-							ADD,
-							CF_PROXY_GENER,
-							CVS,
-							DLS,
-							SUBCONVER,
-							ACL4SSR_CONFIG,
-							onlyTls
+							proxyIP,
+							ENV: env,
 						};
 						return GenSub(args);
 					case pathname === `/bestip/${userID_Path}`:
-						return fetch(`https://bestip.06151953.xyz/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
+						// return fetch(`https://bestip.06151953.xyz/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
+						return fetch(`https://${host}/${userID_Path}?cfproxygener=bestip.06151953.xyz`, { headers: request.headers });
 					default:
 						return new Response(`<html>
 <head><title>${host} - Cloud Drive</title></head>
@@ -162,7 +150,8 @@ export default {
 			}
 		} catch (err) {
 			return new Response(err.toString(), {
-				status: 500
+				status: 500,
+				headers: { "Content-Type": "text/plain; charset=utf-8" }
 			});
 		}
 	},
@@ -173,7 +162,7 @@ export default {
  *
  * @param {*} url
  * @param {*} PROXYIP
- * @param {*} host
+ * @param {*} fetch
  */
 function processProxyip(url, PROXYIP, fetch = false) {
 	let iproxyIP, iproxyPort;
@@ -455,7 +444,7 @@ function handleDefaultPath(url, request) {
 	// 返回伪装的网盘页面
 	return new Response(DrivePage, {
 		headers: {
-			"content-type": "text/html;charset=UTF-8",
+			"content-type": "text/html;charset=utf-8",
 		},
 	});
 }
@@ -1380,12 +1369,22 @@ function getConfig(userID, hostName) {
  * Generates subscription content.
  * @returns {Promise<Response>} Subscription content
  */
-async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GENER, CVS, DLS, SUBCONVER, ACL4SSR_CONFIG, onlyTls }) {
+async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
+
+	let { ADD, GENER, CVS, DLS, SUBCONVER, ACL4SSR_CONFIG, ONLYTLS } = ENV;
 
 	// 订阅链接转换 crash/sing-box 的服务器后端地址
 	let subconverter = SUBCONVER;
 	// 订阅转换配置文件
 	let subConverterMode = ACL4SSR_CONFIG || "https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/refs/heads/master/Clash/config/ACL4SSR_Online.ini";
+
+	onlyTls = ONLYTLS ?? true;
+	if (url.searchParams.has("notTls")) {
+		onlyTls = false;
+	}
+	if (host.includes('pages.dev')) {
+		onlyTls = true;
+	}
 
 	let target = "";
 	if (url.searchParams.has('sub')) {
@@ -1470,7 +1469,7 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 			return new Response(new Error("Illegal Requests").message, {
 				status: 403,
 				headers: {
-					'Content-Type': 'text/html;charset=UTF-8',
+					'Content-Type': 'text/html;charset=utf-8',
 				}
 			});
 		}
@@ -1480,7 +1479,7 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 			return new Response(new Error("Illegal Requests").message, {
 				status: 403,
 				headers: {
-					'Content-Type': 'text/html;charset=UTF-8',
+					'Content-Type': 'text/html;charset=utf-8',
 				}
 			});
 		}
@@ -1489,20 +1488,31 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 	}
 
 	let addresses = [];
-	// CF IP列表
-	if (url.searchParams.has("cfproxylist")) {
-		ADD = url.searchParams.get("cfproxylist").trim().split(/[,\s]+/).map(list => "api://" + list).join(',');
+
+	if (url.searchParams.has("cfproxylist") || url.searchParams.has("cfproxycvs") || url.searchParams.has("cfproxygener")) {
+		// CF IP列表
+		ADD = "";
+		// CVS CF代理表格
+		CVS = "";
+		// CF优选生成器
+		GENER = "";
+
+		if (url.searchParams.get("cfproxylist")) {
+			ADD = url.searchParams.get("cfproxylist").trim().split(/[,\s]+/).map(list => "api://" + list).join(',');
+		}
+		if (url.searchParams.get("cfproxycvs")) {
+			CVS = url.searchParams.get("cfproxycvs");
+		}
+		if (url.searchParams.get("cfproxygener")) {
+			GENER = url.searchParams.get("cfproxygener");
+		}
 	}
+
 	if (ADD) {
 		let res = await getReProxys(ADD, onlyTls);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
-	}
-
-	// CVS CF代理表格
-	if (url.searchParams.has("cfproxycvs")) {
-		CVS = url.searchParams.get("cfproxycvs");
 	}
 	if (CVS) {
 		let res = await getReProxysFromCsv(CVS, onlyTls, DLS);
@@ -1510,13 +1520,8 @@ async function GenSub({ userID, host, userAgent, url, PROXYIP, ADD, CF_PROXY_GEN
 			addresses = addresses.concat(res);
 		}
 	}
-
-	// CF优选生成器
-	if (url.searchParams.has("cfproxygener")) {
-		CF_PROXY_GENER = url.searchParams.get("cfproxygener");
-	}
-	if (CF_PROXY_GENER) {
-		let res = await getReProxysFromGener(CF_PROXY_GENER, userID, host, fakeUserID, randomDomain, onlyTls);
+	if (GENER) {
+		let res = await getReProxysFromGener(GENER, userID, host, fakeUserID, randomDomain, onlyTls);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
