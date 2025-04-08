@@ -1764,7 +1764,7 @@ async function getReProxysFromGener(generStr, userID, host, fakeUserID, randomDo
 		}
 		generNum.add(sub);
 
-		let url = `${sub}/sub?host=${randomDomain}&uuid=${fakeUserID}&type=ws&path=${encodeURIComponent("/?ed=2560")}`;
+		let url = `${sub}/sub?host=${randomDomain}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2560")}`;
 		try {
 			// 可能是base64编码串
 			let encodeStr = await fetchUrl(url, 12000, null, 'v2ray.xray');
