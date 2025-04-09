@@ -125,8 +125,9 @@ export default {
 						};
 						return GenSub(args);
 					case pathname === `/bestip/${userID_Path}`:
-						// return fetch(`https://bestip.06151953.xyz/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
-						return fetchUrl(`https://${host}/${userID_Path}?cfproxygener=bestip.06151953.xyz`, 0, null, userAgent);
+						return fetch(`https://bestip.06151953.xyz/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
+						// 以下不能正常执行，不能引用项目自身
+						// return fetchUrl(`https://${host}/${userID_Path}?cfproxygener=bestip.06151953.xyz`, 0, null, userAgent);
 					default:
 						return new Response(`<html>
 <head><title>${host} - Cloud Drive</title></head>

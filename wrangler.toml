@@ -9,3 +9,7 @@ workers_dev = true
 # UUID = "1b6c1745-992e-4aac-8685-266c090e50ea"
 # SOCKS5 = "127.0.0.1:1080"
 # SOCKS5_RELAY = "true"
+
+# wrangler.toml (wrangler v3.88.0^)
+[observability.logs]
+enabled = true
