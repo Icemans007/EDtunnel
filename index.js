@@ -126,7 +126,7 @@ export default {
 						return GenSub(args);
 					case pathname === `/bestip/${userID_Path}`:
 						// return fetch(`https://bestip.06151953.xyz/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
-						return fetch(`https://${host}/${userID_Path}?cfproxygener=bestip.06151953.xyz`, { headers: request.headers });
+						return fetchUrl(`https://${host}/${userID_Path}?cfproxygener=bestip.06151953.xyz`, 0, null, userAgent);
 					default:
 						return new Response(`<html>
 <head><title>${host} - Cloud Drive</title></head>
@@ -557,7 +557,7 @@ async function ProtocolOverWSHandler(request) {
  * @param {Uint8Array} ProtocolResponseHeader - Protocol response header
  * @param {Function} log - Logging function
  */
-async function HandleTCPOutBound(remoteSocket, addressType, addressRemote, portRemote, rawClientData, webSocket, ProtocolResponseHeader, log,) {
+async function HandleTCPOutBound(remoteSocket, addressType, addressRemote, portRemote, rawClientData, webSocket, ProtocolResponseHeader, log) {
 	async function connectAndWrite(address, port, socks = false) {
 		/** @type {import("@cloudflare/workers-types").Socket} */
 		let tcpSocket;
@@ -1041,7 +1041,7 @@ async function socks5Connect(addressType, addressRemote, portRemote, log) {
 			);
 			break;
 		default:
-			log(`invild  addressType is ${addressType}`);
+			log(`invalid addressType is ${addressType}`);
 			return;
 	}
 	const socksRequest = new Uint8Array([5, 1, 0, ...DSTADDR, portRemote >> 8, portRemote & 0xff]);
@@ -1445,7 +1445,7 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 &config=${encodeURIComponent(subConverterMode)}&udp=true&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
 
 		try {
-			let response = await fetchUrl(ffetch, 16000, null, userAgent, false);
+			let response = await fetchUrl(ffetch, 16000, null, userAgent);
 			// 还原假信息为真
 			// @ts-ignore
 			return new Response((await response.text()).replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host), {
@@ -1552,18 +1552,14 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 		let uniqueAddr = url_arr[0] + ":" + url_arr[1];
 		let old = accMap.get(uniqueAddr);
 		if (!(old && [...decodeURIComponent(old[0])].length >= [...decodeURIComponent(url_arr[2])].length)) {
-			let vess = "";
-			if (!isSubReq) {
-				// 没有 url_arr[3] 的配置默认链接
-				vess = url_arr[3]?.replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host) ||
-				`${atob(pt)}://${userID}${atob(at)}${url_arr[0]}:${url_arr[1]}?encryption=none\
-&type=ws${onlyTls ? "&security=tls" : ""}&host=${host}&sni=${host}&path=${encodeURIComponent("/?ed=2560")}#${encodeURIComponent(url_arr[2])}`;
-			}
-			else {
-				// 没有 url_arr[3] 的配置默认链接
-				vess = url_arr[3] ||
-				`${atob(pt)}://${fakeUserID}${atob(at)}${url_arr[0]}:${url_arr[1]}?encryption=none\
-&type=ws${onlyTls ? "&security=tls" : ""}&host=${fakeHost}&sni=${fakeHost}&path=${encodeURIComponent("/?ed=2560")}#${encodeURIComponent(url_arr[2])}`;
+			let tmpUserID = isSubReq ? fakeUserID : userID;
+			let tmpHost = isSubReq ? fakeHost : host;
+			// 没有 url_arr[3] 的配置默认链接
+			let vess = url_arr[3] || `${atob(pt)}://${tmpUserID}${atob(at)}${url_arr[0]}:${url_arr[1]}?encryption=none\
+&type=ws${onlyTls ? "&security=tls" : ""}&host=${tmpHost}&sni=${tmpHost}&path=${encodeURIComponent("/?ed=2560")}#${encodeURIComponent(url_arr[2])}`;
+
+			if (!isSubReq && url_arr[3]) {
+				vess = url_arr[3].replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host);
 			}
 
 			// 相同 tagname 递增
@@ -1599,7 +1595,7 @@ async function fetchConfig(config_str, needfetch = true, resolve = null, outTime
 				}
 				let furl = str.slice(6);
 				try {
-					let resp = await fetchUrl(furl, outTime, apiReference);
+					let resp = await (await fetchUrl(furl, outTime, apiReference)).text();
 					// 回调处理文件有 api://  的链接
 					return inner(resp);
 				} catch (err) {
@@ -1742,7 +1738,7 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 8) {
 	let apiReference = new Set();
 	for (let furl of cvsUrls) {
 		try {
-			let resp = await fetchUrl(furl, 12000, apiReference);
+			let resp = await (await fetchUrl(furl, 12000, apiReference)).text();
 			handleCVS(resp);
 		} catch (err) {
 			console.error('获取地址时出错: ' + furl, err.message);
@@ -1774,11 +1770,9 @@ async function getReProxysFromGener(generStr, fakeUserID, fakeHost, onlyTls = tr
 		let url = `${sub}/sub?host=${fakeHost}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2560")}`;
 		try {
 			// 可能是base64编码串
-			let encodeStr = await fetchUrl(url, 12000, null, 'v2ray.xray');
+			let encodeStr = await (await fetchUrl(url, 12000, null, 'v2ray.xray')).text();
 			// 将Base64数据解码
-			// @ts-ignore
 			encodeStr = (isBase64(encodeStr) ? atob(encodeStr) : encodeStr);
-			// @ts-ignore
 			return encodeStr.split('\n');
 		} catch (err) {
 			console.error('解析ProxyGener地址时出错: ' + url, err);
@@ -1840,10 +1834,9 @@ function parseAddrLinks(ips, onlyTls, isVess = false) {
  * @param {number} [outTime=0]
  * @param {Set} [apiAvoidDupRef=null]
  * @param {string} [UA="Mozilla/5.0 Chrome/131.0.0.0"]
- * @param {boolean} [respText=true]
- * @returns {Promise<string | Response>}
+ * @returns {Promise<Response>} fetch content
  */
-async function fetchUrl(furl, outTime = 0, apiAvoidDupRef = null, UA = "Mozilla/5.0 Chrome/131.0.0.0", respText = true) {
+function fetchUrl(furl, outTime = 0, apiAvoidDupRef = null, UA = "Mozilla/5.0 Chrome/131.0.0.0") {
 	let converSplit = furl.split("://");
 	if (converSplit.length < 2) {
 		furl = "https://" + converSplit[0];
@@ -1861,7 +1854,7 @@ async function fetchUrl(furl, outTime = 0, apiAvoidDupRef = null, UA = "Mozilla/
 		abortc = new AbortController();
 		id = setTimeout(() => abortc.abort(), outTime);
 	}
-	const resp = await fetch(furl, {
+	const resp = fetch(furl, {
 		method: 'get',
 		headers: {
 			'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
@@ -1876,11 +1869,8 @@ async function fetchUrl(furl, outTime = 0, apiAvoidDupRef = null, UA = "Mozilla/
 		}
 		throw error;
 	});
-	if (!resp.ok) {
-		throw new Error(resp.statusText);
-	}
 
-	return respText ? resp.text() : resp;
+	return resp;
 }
 
 function generateRandomUUID() {
