@@ -111,7 +111,7 @@ jobs:
             ADD
             GENER
             CVS
-            DLS
+            DLSstr
             ACL4SSR_CONFIG
             SUBCONVER
             ONLYTLS
@@ -121,7 +121,7 @@ jobs:
           ADD: ${{ vars.ADD }}
           GENER: ${{ vars.GENER }}
           CVS: ${{ vars.CVS }}
-          DLS: ${{ vars.DLS }}
+          DLSstr: ${{ vars.DLSstr }}
           ACL4SSR_CONFIG: ${{ vars.ACL4SSR_CONFIG }}
           SUBCONVER: ${{ vars.SUBCONVER }}
           ONLYTLS: ${{ vars.ONLYTLS }}

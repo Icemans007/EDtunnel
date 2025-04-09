@@ -126,8 +126,8 @@ export default {
 						return GenSub(args);
 					case pathname === `/bestip/${userID_Path}`:
 						return fetch(`https://bestip.06151953.xyz/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
-						// 以下不能正常执行，不能引用项目自身
-						// return fetchUrl(`https://${host}/${userID_Path}?cfproxygener=bestip.06151953.xyz`, 0, null, userAgent);
+					// 以下不能正常执行，不能引用项目自身
+					// return fetchUrl(`https://${host}/${userID_Path}?cfproxygener=bestip.06151953.xyz`, 0, null, userAgent);
 					default:
 						return new Response(`<html>
 <head><title>${host} - Cloud Drive</title></head>
@@ -1372,20 +1372,12 @@ function getConfig(userID, hostName) {
  */
 async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 
-	let { ADD, GENER, CVS, DLS, SUBCONVER, ACL4SSR_CONFIG, ONLYTLS } = ENV;
+	let { ADD, GENER, CVS, DLSstr, SUBCONVER, ACL4SSR_CONFIG, ONLYTLS } = ENV;
 
 	// 订阅链接转换 crash/sing-box 的服务器后端地址
 	let subconverter = SUBCONVER;
 	// 订阅转换配置文件
 	let subConverterMode = ACL4SSR_CONFIG || "https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/refs/heads/master/Clash/config/ACL4SSR_Online.ini";
-
-	onlyTls = ONLYTLS ?? true;
-	if (url.searchParams.has("notTls")) {
-		onlyTls = false;
-	}
-	if (host.includes('pages.dev')) {
-		onlyTls = true;
-	}
 
 	let target = "";
 	if (url.searchParams.has('sub')) {
@@ -1405,6 +1397,15 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 	if (url.searchParams.has("cfproxylist") || url.searchParams.has("cfproxycvs") || url.searchParams.has("cfproxygener")) {
 		hasProxyParams = true;
 	}
+
+	onlyTls = ONLYTLS ?? true;
+	if (url.searchParams.has("notTls")) {
+		onlyTls = false;
+	}
+	if (host.includes('pages.dev')) {
+		onlyTls = true;
+	}
+
 	if (!target && !hasProxyParams && !isSubReq && userAgent.toLowerCase().includes('mozilla')) {
 		return new Response(getConfig(userID, host), {
 			status: 200,
@@ -1492,6 +1493,10 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 		[fakeUserID, fakeHost] = token;
 	}
 
+	if (url.searchParams.get("DLSstr")) {
+		DLSstr = url.searchParams.get("DLSstr");
+	}
+
 	let addresses = [];
 
 	if (hasProxyParams) {
@@ -1520,7 +1525,7 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 		}
 	}
 	if (CVS) {
-		let res = await getReProxysFromCsv(CVS, onlyTls, DLS);
+		let res = await getReProxysFromCsv(CVS, onlyTls, DLSstr);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
@@ -1621,13 +1626,13 @@ async function getReProxys(add, onlyTls) {
 	return parseAddrLinks(ips, onlyTls);
 }
 
-async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 8) {
+async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 5) {
 	if (!cvs || (cvs = cvs.trim()).length == 0) {
 		return [];
 	}
 
 	// csv 数据太多，默认是排序的，每个CVS表格只获取符合条件的前8条
-	const [DLS = 8, MAXROW = 8] = String(DLSstr).split(":").map(d => isFinite(+d) ? +d : undefined);
+	const [DLS = 5, MAXROW = 8] = String(DLSstr).split(":").map(d => isFinite(+d) ? +d : undefined);
 	let addresses = [];
 
 	const handleCVS = function (lines) {
@@ -1687,7 +1692,7 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 8) {
 				continue;
 			}
 
-			if (maxrow < 1) {
+			if (MAXROW > 0 && maxrow < 1) {
 				continue;
 			}
 			let columns = lines[i].split(',').map(txt => txt.trim());
@@ -1730,7 +1735,7 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 8) {
 
 			let address = [columns[ipColIndex], port, tag];
 			addresses.push(address);
-			maxrow--;
+			MAXROW > 0 && maxrow--;
 		}
 	}
 
