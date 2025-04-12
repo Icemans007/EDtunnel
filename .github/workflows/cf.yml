@@ -115,6 +115,7 @@ jobs:
             ACL4SSR_CONFIG
             SUBCONVER
             ONLYTLS
+            URL302
         env:
           UUID: ${{ vars.UUID }}
           PROXYIP: ${{ vars.PROXYIP }}
@@ -125,6 +126,7 @@ jobs:
           ACL4SSR_CONFIG: ${{ vars.ACL4SSR_CONFIG }}
           SUBCONVER: ${{ vars.SUBCONVER }}
           ONLYTLS: ${{ vars.ONLYTLS }}
+          URL302: ${{ vars.URL302 }}
 
       - name: 🎤 Notice
         run: |

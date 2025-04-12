@@ -129,6 +129,9 @@ export default {
 					// 以下不能正常执行，不能引用项目自身
 					// return fetchUrl(`https://${host}/${userID_Path}?cfproxygener=bestip.06151953.xyz`, 0, null, userAgent);
 					default:
+						if (env.URL302) {
+							return Response.redirect(`${env.URL302}${pathname}`, 302);
+						}
 						return new Response(`<html>
 <head><title>${host} - Cloud Drive</title></head>
 <body>
