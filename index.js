@@ -197,7 +197,7 @@ function processProxyip(url, PROXYIP, fetch = false) {
  */
 function handleForward(env, request) {
 	const url = new URL(request.url);
-	const targetUrl = new URL(env.FORWARD + url.pathname + url.search);
+	const targetUrl = new URL(env.URL_FORWARD + url.pathname + url.search);
 	// 复制原始头，并移除/修改敏感头
 	const safeHeaders = ['accept', 'content-type', 'user-agent'];
 	const headers = new Headers(
