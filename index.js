@@ -199,14 +199,12 @@ function handleForward(env, request) {
 	const url = new URL(request.url);
 	const targetUrl = new URL(env.URL_FORWARD + url.pathname + url.search);
 	// 复制原始头，并移除/修改敏感头
-	const safeHeaders = ['accept', 'content-type', 'user-agent'];
 	const headers = new Headers(
-		[...request.headers].filter(([key]) => safeHeaders.includes(key.toLowerCase()))
+		[...request.headers].filter(([key]) => !key.toLowerCase().startsWith('cf-'))
 	);
 
 	// 强制设置正确的 Host 头
 	headers.set('Host', targetUrl.hostname);
-	headers.set('X-Forwarded-Proto', url.protocol.replace(':', ''));
 	// 转发请求
 	return fetch(targetUrl, {
 		method: request.method,
