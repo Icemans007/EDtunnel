@@ -58,7 +58,7 @@ const HttpsPort = new Set([443, 8443, 2053, 2096, 2087, 2083]);
 export default {
 	/**
 	 * @param {import("@cloudflare/workers-types").Request} request
-	 * @param {{UUID: string, PROXYIP: string, SOCKS5: string, SOCKS5_RELAY: boolean}} env
+	 * @param {Object} env
 	 * @param {import("@cloudflare/workers-types").ExecutionContext} _ctx
 	 * @returns {Promise<Response>}
 	 */
@@ -104,8 +104,7 @@ export default {
 
 				switch (true) {
 					case pathname === '/':
-						// @ts-ignore
-						if (env.URL302) return Response.redirect(env.URL302, 302);
+						if (env.URL_FORWARD) return handleForward(env, request);
 						// 伪装页面
 						return handleDefaultPath(url, request);
 					case pathname === '/cfrequest':
@@ -129,9 +128,7 @@ export default {
 					// 以下不能正常执行，不能引用项目自身
 					// return fetchUrl(`https://${host}/${userID_Path}?cfproxygener=bestip.06151953.xyz`, 0, null, userAgent);
 					default:
-						if (env.URL302) {
-							return Response.redirect(`${env.URL302}${pathname}`, 302);
-						}
+						if (env.URL_FORWARD) return handleForward(env, request);
 						return new Response(`<html>
 <head><title>${host} - Cloud Drive</title></head>
 <body>
@@ -191,6 +188,32 @@ function processProxyip(url, PROXYIP, fetch = false) {
 	}
 
 	return [iproxyIP, iproxyPort];
+}
+
+/**
+ * @param {Object} env
+ * @param {Request} request - The incoming request object
+ * @returns {Promise<Response>}
+ */
+function handleForward(env, request) {
+	const url = new URL(request.url);
+	const targetUrl = new URL(env.FORWARD + url.pathname + url.search);
+	// 复制原始头，并移除/修改敏感头
+	const safeHeaders = ['accept', 'content-type', 'user-agent'];
+	const headers = new Headers(
+		[...request.headers].filter(([key]) => safeHeaders.includes(key.toLowerCase()))
+	);
+
+	// 强制设置正确的 Host 头
+	headers.set('Host', targetUrl.hostname);
+	headers.set('X-Forwarded-Proto', url.protocol.replace(':', ''));
+	// 转发请求
+	return fetch(targetUrl, {
+		method: request.method,
+		headers: headers,
+		body: request.body,
+		redirect: 'follow'
+	});
 }
 
 /**
