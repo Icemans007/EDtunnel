@@ -110,7 +110,7 @@ jobs:
             PROXYIP
             ADD
             GENER
-            CVS
+            CSV
             DLSstr
             ACL4SSR_CONFIG
             SUBCONVER
@@ -121,7 +121,7 @@ jobs:
           PROXYIP: ${{ vars.PROXYIP }}
           ADD: ${{ vars.ADD }}
           GENER: ${{ vars.GENER }}
-          CVS: ${{ vars.CVS }}
+          CSV: ${{ vars.CSV }}
           DLSstr: ${{ vars.DLSstr }}
           ACL4SSR_CONFIG: ${{ vars.ACL4SSR_CONFIG }}
           SUBCONVER: ${{ vars.SUBCONVER }}
