@@ -1396,7 +1396,7 @@ function getConfig(userID, hostName) {
  */
 async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 
-	let { ADD, GENER, CVS, DLSstr, SUBCONVER, ACL4SSR_CONFIG, ONLYTLS } = ENV;
+	let { ADD, GENER, CSV, DLSstr, SUBCONVER, ACL4SSR_CONFIG, ONLYTLS } = ENV;
 
 	// 订阅链接转换 crash/sing-box 的服务器后端地址
 	let subconverter = SUBCONVER;
@@ -1418,7 +1418,7 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 	// 是否是第三方后端订阅转换服务请求 https://${host}/convertersubrequest
 	let isSubReq = url.pathname.toLowerCase().startsWith("/convertersubrequest");
 	let hasProxyParams = false;
-	if (url.searchParams.has("cfproxylist") || url.searchParams.has("cfproxycvs") || url.searchParams.has("cfproxygener")) {
+	if (url.searchParams.has("cfproxylist") || url.searchParams.has("cfproxycsv") || url.searchParams.has("cfproxygener")) {
 		hasProxyParams = true;
 	}
 
@@ -1526,16 +1526,16 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 	if (hasProxyParams) {
 		// CF IP列表
 		ADD = "";
-		// CVS CF代理表格
-		CVS = "";
+		// CSV CF代理表格
+		CSV = "";
 		// CF优选生成器
 		GENER = "";
 
 		if (url.searchParams.get("cfproxylist")) {
 			ADD = url.searchParams.get("cfproxylist").trim().split(/[,\s]+/).map(list => "api://" + list).join(',');
 		}
-		if (url.searchParams.get("cfproxycvs")) {
-			CVS = url.searchParams.get("cfproxycvs");
+		if (url.searchParams.get("cfproxycsv")) {
+			CSV = url.searchParams.get("cfproxycsv");
 		}
 		if (url.searchParams.get("cfproxygener")) {
 			GENER = url.searchParams.get("cfproxygener");
@@ -1548,8 +1548,8 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 			addresses = addresses.concat(res);
 		}
 	}
-	if (CVS) {
-		let res = await getReProxysFromCsv(CVS, onlyTls, DLSstr);
+	if (CSV) {
+		let res = await getReProxysFromCsv(CSV, onlyTls, DLSstr);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
@@ -1650,19 +1650,19 @@ async function getReProxys(add, onlyTls) {
 	return parseAddrLinks(ips, onlyTls);
 }
 
-async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 5) {
-	if (!cvs || (cvs = cvs.trim()).length == 0) {
+async function getReProxysFromCsv(csv, onlyTls, DLSstr = 5) {
+	if (!csv || (csv = csv.trim()).length == 0) {
 		return [];
 	}
 
-	// csv 数据太多，默认是排序的，每个CVS表格只获取符合条件的前8条
+	// csv 数据太多，默认是排序的，每个CSV表格只获取符合条件的前8条
 	const [DLS = 5, MAXROW = 8] = String(DLSstr).split(":").map(d => isFinite(+d) ? +d : undefined);
 	let addresses = [];
 
-	const handleCVS = function (lines) {
+	const handleCSV = function (lines) {
 		lines = lines.split('\n').map(txt => txt.trim()).filter(Boolean);
 		if (!lines || lines.length === 0) {
-			console.warn('CSV文件为空: ', cvs);
+			console.warn('CSV文件为空: ', csv);
 			return;
 		}
 		let header = null;
@@ -1672,10 +1672,10 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 5) {
 		let tlsColIndex = -1;
 		let countryColIndex = -1; // 国家
 		let cityColIndex = -1;  // 城市
-		let speedColIndex = -1; // cvs 速度
+		let speedColIndex = -1; // csv 速度
 		let idcColIndex = -1; // 数据中心
 		let continentColIndex = -1; // 洲
-		let speedUnits = ""; // cvs 测速单位
+		let speedUnits = ""; // csv 测速单位
 		let maxrow = 0;
 
 		for (let i = 0; i < lines.length; i++) {
@@ -1771,13 +1771,13 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 5) {
 		}
 	}
 
-	let cvsUrls = cvs.split(/[,\s]+/);
+	let csvUrls = csv.split(/[,\s]+/);
 	// 避免 api:// 的链接调用循环
 	let apiReference = new Set();
-	for (let furl of cvsUrls) {
+	for (let furl of csvUrls) {
 		try {
 			let resp = await (await fetchUrl(furl, 12000, apiReference)).text();
-			handleCVS(resp);
+			handleCSV(resp);
 		} catch (err) {
 			console.error('获取地址时出错: ' + furl, err.message);
 			return []; // 如果有错误，直接返回
