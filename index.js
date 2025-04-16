@@ -1670,9 +1670,11 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 5) {
 		let ipColIndex = -1;
 		let portColIndex = -1;
 		let tlsColIndex = -1;
-		let countryColIndex = -1;
-		let cityColIndex = -1;
-		let speedColIndex = -1;
+		let countryColIndex = -1; // 国家
+		let cityColIndex = -1;  // 城市
+		let speedColIndex = -1; // cvs 速度
+		let idcColIndex = -1; // 数据中心
+		let continentColIndex = -1; // 洲
 		let speedUnits = ""; // cvs 测速单位
 		let maxrow = 0;
 
@@ -1694,7 +1696,7 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 5) {
 				huf = false;
 				maxrow = MAXROW;
 				ipColIndex = header.findIndex(str => str.startsWith('ip') || str.includes('地址'));
-				portColIndex = header.findIndex(str => str.includes('端口') || str.startsWith('port'));
+				portColIndex = header.findIndex(str => str.startsWith('端口') || str.startsWith('port'));
 				if (ipColIndex === -1) {
 					console.warn('CSV文件缺少必需的字段');
 					return;
@@ -1704,6 +1706,8 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 5) {
 				countryColIndex = header.findIndex(str => str.includes('国家'));
 				cityColIndex = header.findIndex(str => str.includes('城市') || str.includes('city'));
 				speedColIndex = header.findLastIndex(item => item.includes("速度") || item.includes("speed"));
+				idcColIndex = header.findLastIndex(item => item.includes("数据中心") || item.includes("idc"));
+				continentColIndex = header.findLastIndex(item => item.includes("地区"));
 				speedUnits = "";	// 换了header, 单位重新计算
 
 				if (header[speedColIndex]?.includes('kb')) {
@@ -1753,9 +1757,13 @@ async function getReProxysFromCsv(cvs, onlyTls, DLSstr = 5) {
 			}
 
 			let tag = "";
-			if (columns[countryColIndex]) tag += columns[countryColIndex] + " ";
-			if (columns[cityColIndex]) tag += columns[cityColIndex];
-			if (tag.length === 0) tag += columns[ipColIndex];
+			if (columns[continentColIndex]) tag += "-" + columns[continentColIndex];
+			if (columns[countryColIndex]) tag += "-" + columns[countryColIndex];
+			if (columns[cityColIndex]) tag += "-" + columns[cityColIndex];
+			if (columns[idcColIndex]) tag += "-" + columns[idcColIndex];
+
+			if (tag.length == 0) tag += columns[ipColIndex];
+			else tag = tag.slice(1);
 
 			let address = [columns[ipColIndex], port, tag];
 			addresses.push(address);
