@@ -109,7 +109,7 @@ jobs:
             UUID
             PROXYIP
             ADD
-            GENER
+            SUB
             CSV
             DLSstr
             ACL4SSR_CONFIG
@@ -120,7 +120,7 @@ jobs:
           UUID: ${{ vars.UUID }}
           PROXYIP: ${{ vars.PROXYIP }}
           ADD: ${{ vars.ADD }}
-          GENER: ${{ vars.GENER }}
+          SUB: ${{ vars.SUB }}
           CSV: ${{ vars.CSV }}
           DLSstr: ${{ vars.DLSstr }}
           ACL4SSR_CONFIG: ${{ vars.ACL4SSR_CONFIG }}

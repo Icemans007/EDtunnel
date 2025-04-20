@@ -1396,7 +1396,7 @@ function getConfig(userID, hostName) {
  */
 async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 
-	let { ADD, GENER, CSV, DLSstr, SUBCONVER, ACL4SSR_CONFIG, ONLYTLS } = ENV;
+	let { ADD, SUB, CSV, DLSstr, SUBCONVER, ACL4SSR_CONFIG, ONLYTLS } = ENV;
 
 	// 订阅链接转换 crash/sing-box 的服务器后端地址
 	let subconverter = SUBCONVER;
@@ -1418,7 +1418,7 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 	// 是否是第三方后端订阅转换服务请求 https://${host}/convertersubrequest
 	let isSubReq = url.pathname.toLowerCase().startsWith("/convertersubrequest");
 	let hasProxyParams = false;
-	if (url.searchParams.has("cfproxylist") || url.searchParams.has("cfproxycsv") || url.searchParams.has("cfproxygener")) {
+	if (url.searchParams.has("cfproxylist") || url.searchParams.has("cfproxycsv") || url.searchParams.has("cfproxysub")) {
 		hasProxyParams = true;
 	}
 
@@ -1529,7 +1529,7 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 		// CSV CF代理表格
 		CSV = "";
 		// CF优选生成器
-		GENER = "";
+		SUB = "";
 
 		if (url.searchParams.get("cfproxylist")) {
 			ADD = url.searchParams.get("cfproxylist").trim().split(/[,\s]+/).map(list => "api://" + list).join(',');
@@ -1537,8 +1537,8 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 		if (url.searchParams.get("cfproxycsv")) {
 			CSV = url.searchParams.get("cfproxycsv");
 		}
-		if (url.searchParams.get("cfproxygener")) {
-			GENER = url.searchParams.get("cfproxygener");
+		if (url.searchParams.get("cfproxysub")) {
+			SUB = url.searchParams.get("cfproxysub");
 		}
 	}
 
@@ -1554,8 +1554,8 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 			addresses = addresses.concat(res);
 		}
 	}
-	if (GENER) {
-		let res = await getReProxysFromGener(GENER, fakeUserID, fakeHost, onlyTls);
+	if (SUB) {
+		let res = await getReProxysFromGener(SUB, fakeUserID, fakeHost, onlyTls);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
@@ -1707,7 +1707,7 @@ async function getReProxysFromCsv(csv, onlyTls, DLSstr = 5) {
 				cityColIndex = header.findIndex(str => str.includes('城市') || str.includes('city'));
 				speedColIndex = header.findLastIndex(item => item.includes("速度") || item.includes("speed"));
 				idcColIndex = header.findLastIndex(item => item.includes("数据中心") || item.includes("idc"));
-				continentColIndex = header.findLastIndex(item => item.includes("地区"));
+				continentColIndex = header.findLastIndex(item => item.includes("地区") || item.includes("region"));
 				speedUnits = "";	// 换了header, 单位重新计算
 
 				if (header[speedColIndex]?.includes('kb')) {
@@ -1757,9 +1757,9 @@ async function getReProxysFromCsv(csv, onlyTls, DLSstr = 5) {
 			}
 
 			let tag = "";
-			if (columns[continentColIndex]) tag += "-" + columns[continentColIndex];
-			if (columns[countryColIndex]) tag += "-" + columns[countryColIndex];
 			if (columns[cityColIndex]) tag += "-" + columns[cityColIndex];
+			if (columns[countryColIndex]) tag += "-" + columns[countryColIndex];
+			if (columns[continentColIndex]) tag += "-" + columns[continentColIndex];
 			if (columns[idcColIndex]) tag += "-" + columns[idcColIndex];
 
 			if (tag.length == 0) tag += columns[ipColIndex];
