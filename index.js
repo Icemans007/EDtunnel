@@ -104,7 +104,7 @@ export default {
 
 				switch (true) {
 					case pathname === '/':
-						if (env.URL_FORWARD) return handleForward(env, request);
+						// if (env.URL_FORWARD) return handleForward(env, request);
 						// 伪装页面
 						return handleDefaultPath(url, request);
 					case pathname === '/cfrequest':
@@ -128,7 +128,7 @@ export default {
 					// 以下不能正常执行，不能引用项目自身
 					// return fetchUrl(`https://${host}/${userID_Path}?cfproxygener=bestip.06151953.xyz`, 0, null, userAgent);
 					default:
-						if (env.URL_FORWARD) return handleForward(env, request);
+						// if (env.URL_FORWARD) return handleForward(env, request);
 						return new Response(`<html>
 <head><title>${host} - Cloud Drive</title></head>
 <body>
