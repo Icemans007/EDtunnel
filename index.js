@@ -78,7 +78,7 @@ export default {
 			socks5Address = SOCKS5 || socks5Address;
 			socks5Relay = SOCKS5_RELAY || socks5Relay;
 
-			[proxyIP, proxyPort] = processProxyip(url, PROXYIP, host);
+			[proxyIP, proxyPort] = processProxyip(url, PROXYIP);
 
 			if (socks5Address) {
 				try {
@@ -119,7 +119,6 @@ export default {
 							host,
 							url,
 							userAgent,
-							proxyIP,
 							ENV: env,
 						};
 						return GenSub(args);
@@ -163,15 +162,13 @@ export default {
  *
  * @param {*} url
  * @param {*} PROXYIP
- * @param {*} fetch
  */
-function processProxyip(url, PROXYIP, fetch = false) {
+function processProxyip(url, PROXYIP) {
 	let iproxyIP, iproxyPort;
 	let requestProxyip = url.searchParams.get("proxyip") || url.searchParams.get("pyip");
 
 	if (requestProxyip || PROXYIP) {
 		// Split PROXYIP into an array of proxy addresses
-		// const proxyAddresses = await fetchConfig(PROXYIP, fetch);
 		const proxyAddresses = (requestProxyip || PROXYIP).trim().split(/[,\s]+/).filter(addr => addr.charAt(0) !== "#");
 		// Randomly select one proxy address
 		const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
@@ -1112,7 +1109,7 @@ function socks5AddressParser(address) {
 		throw new Error('Invalid SOCKS address format');
 	}
 	hostname = latters.join(":");
-	const regex = /^\[.*\]$/;
+	const regex = /^\[[^\]]+\]$/;
 	if (hostname.includes(":") && !regex.test(hostname)) {
 		throw new Error('Invalid SOCKS address format');
 	}
@@ -1126,6 +1123,7 @@ function socks5AddressParser(address) {
 
 const at = atob('UUE9PQ==');
 const pt = atob('ZG14bGMzTT0=');
+const ptm = atob('ZG0xbGMzTT0=');
 const ed = atob('UlVSMGRXNXVaV3c9');
 
 /**
@@ -1394,9 +1392,9 @@ function getConfig(userID, hostName) {
  * Generates subscription content.
  * @returns {Promise<Response>} Subscription content
  */
-async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
+async function GenSub({ userID, host, userAgent, url, ENV }) {
 
-	let { ADD, SUB, CSV, DLSstr, SUBCONVER, ACL4SSR_CONFIG, ONLYTLS } = ENV;
+	let { ADD, SUB, CSV, LINKS, DLSstr, SUBCONVER, ACL4SSR_CONFIG, ONLYTLS } = ENV;
 
 	// 订阅链接转换 crash/sing-box 的服务器后端地址
 	let subconverter = SUBCONVER;
@@ -1438,7 +1436,7 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 	}
 
 	let fakeUserID = generateRandomUUID();
-	let fakeHost = generateRandomStr(12) + [".net", ".com", ".org", ".edu", ".cn", ".jp", ".xyz", ".us"].at(Math.random() * 8 | 0);
+	let fakeHost = generateRandomStr(8) + "." + generateRandomStr(6) + [".net", ".com", ".org", ".edu", ".cn", ".jp", ".xyz", ".us"].at(Math.random() * 8 | 0);
 
 	if (!isSubReq && (target === "clash" || target === "singbox")) {
 		if (url.searchParams.has("subconverter")) {
@@ -1473,13 +1471,9 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 		try {
 			let response = await fetchUrl(ffetch, 16000, null, userAgent);
 			// 还原假信息为真
-			// @ts-ignore
 			return new Response((await response.text()).replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host), {
-				// @ts-ignore
 				status: response.status,
-				// @ts-ignore
 				statusText: response.statusText,
-				// @ts-ignore
 				headers: response.headers
 			});
 		} catch (err) {
@@ -1528,8 +1522,9 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 		ADD = "";
 		// CSV CF代理表格
 		CSV = "";
-		// CF优选生成器
+		// 优选生成器
 		SUB = "";
+		LINKS = "";
 
 		if (url.searchParams.get("cfproxylist")) {
 			ADD = url.searchParams.get("cfproxylist").trim().split(/[,\s]+/).map(list => "api://" + list).join(',');
@@ -1543,27 +1538,29 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 	}
 
 	if (ADD) {
-		let res = await getReProxys(ADD, onlyTls);
+		let res = await getCfRevRowByText(ADD, onlyTls);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
 	}
 	if (CSV) {
-		let res = await getReProxysFromCsv(CSV, onlyTls, DLSstr);
+		let res = await getCfRevByCsv(CSV, onlyTls, DLSstr);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
 	}
 	if (SUB) {
-		let res = await getReProxysFromGener(SUB, fakeUserID, fakeHost, onlyTls);
+		let res = await getProxyBySub(SUB, fakeUserID, fakeHost, onlyTls);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
 	}
 
-	let partTag = "";
-	if (!isSubReq && (host.includes('.workers.dev') || host.includes('.pages.dev'))) {
-		partTag += encodeURIComponent("--请绑定自定义域!");
+	if (LINKS) {
+		let res = getProxyByLink(LINKS);
+		if (res.length > 0) {
+			addresses = addresses.concat(res);
+		}
 	}
 
 	// 这里query proxyip 会多一个api请求获取proxyip过程
@@ -1571,86 +1568,77 @@ async function GenSub({ userID, host, userAgent, url, proxyIP, ENV }) {
 	// &path=${encodeURIComponent("/?ed=2560&proxyip=" + proxyIP + ":" + proxyPort)}
 
 	// 如果是isSubReq，需要设置替换为假信息， 根据 address:port 去重， tag相同+1递增
-	let uniqueTags = new Map(Array.from(new Set(addresses.map(m => m[2]))).map(a => [a, 0]));
+	let uniqueTags = new Map(Array.from(new Set(addresses.map(m => m[3]))).map(a => [a, 0]));
 
 	let linkes = addresses.reduce((accMap, url_arr) => {
-		// url_arr[0] ==> address
-		// url_arr[1] ==> port
-		// url_arr[2] ==> tagname
-		// url_arr[3] ==> v_less 完整链接,可能为undefined, 当不为undefined时，要按需（!isSubReq）将fakeUserID、fakeHost 还原
-		// 利用 uniqueAddr【address:port】去重
-		let uniqueAddr = url_arr[0] + ":" + url_arr[1];
+		// url_arr[0] ==> protocol
+		// url_arr[1] ==> address
+		// url_arr[2] ==> port
+		// url_arr[3] ==> tagname
+		// url_arr[4] ==> 完整链接,可能为undefined, 当不为undefined时，要按需（!isSubReq）将fakeUserID、fakeHost 还原
+		// 利用 uniqueAddr【protocol:address:port】去重
+		let uniqueAddr = url_arr[0] + ":" + url_arr[1] + ":" + url_arr[2];
 		let old = accMap.get(uniqueAddr);
-		if (!(old && [...decodeURIComponent(old[0])].length >= [...decodeURIComponent(url_arr[2])].length)) {
+		if (!(old && [...old[0]].length >= [...url_arr[3]].length)) {
 			let tmpUserID = isSubReq ? fakeUserID : userID;
 			let tmpHost = isSubReq ? fakeHost : host;
-			// 没有 url_arr[3] 的配置默认链接
-			let vess = url_arr[3] || `${atob(pt)}://${tmpUserID}${atob(at)}${url_arr[0]}:${url_arr[1]}?encryption=none\
-&type=ws${onlyTls ? "&security=tls" : ""}&host=${tmpHost}&sni=${tmpHost}&path=${encodeURIComponent("/?ed=2560")}#${encodeURIComponent(url_arr[2])}`;
+			// 没有 url_arr[4] 是 v l ess
+			let link = url_arr[4] || `${atob(pt)}://${tmpUserID}${atob(at)}${url_arr[1]}:${url_arr[2]}?encryption=none\
+&type=ws${onlyTls ? "&security=tls" : ""}&host=${tmpHost}&sni=${tmpHost}&path=${encodeURIComponent("/?ed=2560")}#${encodeURIComponent(url_arr[3])}`;
 
-			if (!isSubReq && url_arr[3]) {
-				vess = url_arr[3].replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host);
+			if (!isSubReq && url_arr[4]?.includes(fakeUserID) && url_arr[4]?.includes(fakeHost)) {
+				link = url_arr[4].replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host);
 			}
 
 			// 相同 tagname 递增
-			let tag = "";
-			let num = uniqueTags.get(url_arr[2]);
-			uniqueTags.set(url_arr[2], ++num);
+			let num = uniqueTags.get(url_arr[3]);
+			uniqueTags.set(url_arr[3], ++num);
 			if (num > 1) {
-				tag = `%20${num}`;
+				link += `%20${num}`;
 			}
-			vess += (tag + partTag);
-			accMap.set(uniqueAddr, [url_arr[2], vess]);
+			accMap.set(uniqueAddr, [url_arr[3], link]);
 		}
 		return accMap;
 	}, new Map()).values().toArray().map(m => m[1]).join('\n');
 
-	return new Response(btoa(linkes), {
+	return new Response(btoa(unescape(encodeURIComponent(linkes))), {
 		status: 200,
 		headers: { "Content-Type": "text/plain; charset=utf-8" },
 	});
 }
 
-async function fetchConfig(config_str, needfetch = true, resolve = null, outTime = 8000) {
-	// 避免 api:// 的链接调用循环
-	let apiReference = new Set();
-	let inner = async function (config_str) {
-		return (await Promise.all(config_str.trim().split(/[\n,]+/).map(v => v.trim()).map(async str => {
-			// 前面是# 号的是忽略的配置
-			if (str.charAt(0) === '#') return;
-
-			if (str.startsWith("api://")) {
-				if (!needfetch) {
-					return;
-				}
-				let furl = str.slice(6);
-				try {
-					let resp = await (await fetchUrl(furl, outTime, apiReference)).text();
-					// 回调处理文件有 api://  的链接
-					return inner(resp);
-				} catch (err) {
-					console.error('获取地址时出错: ' + str, err.message);
-					return; // 如果有错误，直接返回
-				}
-			}
-			// 不是 api:// 开头看是否需要进一步处理
-			return typeof resolve === 'function' ? resolve(str) : str;
-		}))).flat().filter(Boolean).map(ip => ip.trim());
-	}
-
-	return inner(config_str);
-}
-
-async function getReProxys(add, onlyTls) {
+/*
+abc.com:端口#节点名
+123.123.123.123:端口#节点名
+[abc:1234::1]:端口#节点名
+*/
+async function getCfRevRowByText(add, onlyTls) {
 	if (!add || (add = add.trim()).length == 0) {
 		return [];
 	}
 	let ips = await fetchConfig(add);
+	const regExp = /^((?:[\w-]+\.)+[a-z-]+|\d{1,3}(?:\.\d{1,3}){3}|\[[a-f0-9:]+\])(?::(\d+))?(?:#(.+)$)?/i;
 
-	return parseAddrLinks(ips, onlyTls);
+	return ips.map(ip => {
+		let match = regExp.exec(ip);
+		if (!match) {
+			return;
+		}
+		let [, host, port, tag = host] = match;
+		if (!port) {
+			// 没有设置端口的，根据 CF 默认端口返回
+			if (!onlyTls) {
+				port = "80";
+			}
+			port = "443";
+		}
+
+		return [atob(pt), host, port, tag];
+	}).filter(Boolean);
 }
 
-async function getReProxysFromCsv(csv, onlyTls, DLSstr = 5) {
+// 通过csv文件获取cf代理IP
+async function getCfRevByCsv(csv, onlyTls, DLSstr = 5) {
 	if (!csv || (csv = csv.trim()).length == 0) {
 		return [];
 	}
@@ -1716,7 +1704,6 @@ async function getReProxysFromCsv(csv, onlyTls, DLSstr = 5) {
 				else if (header[speedColIndex]?.includes('mb')) {
 					speedUnits = "MB";
 				}
-
 				continue;
 			}
 
@@ -1738,7 +1725,6 @@ async function getReProxysFromCsv(csv, onlyTls, DLSstr = 5) {
 					speedUnits = "MB";
 				}
 			}
-
 			// 检查速度大于DLS(DLS 是MB)
 			let dataSpeed = parseFloat(columns[speedColIndex]);
 			if (DLS > 0 && !isNaN(dataSpeed)) {
@@ -1749,7 +1735,6 @@ async function getReProxysFromCsv(csv, onlyTls, DLSstr = 5) {
 					continue;
 				}
 			}
-
 			// 端口
 			let port = columns[portColIndex] || '443';
 			if (!columns[portColIndex] && columns[tlsColIndex]?.toLowerCase() !== 'true') {
@@ -1761,11 +1746,10 @@ async function getReProxysFromCsv(csv, onlyTls, DLSstr = 5) {
 			if (columns[countryColIndex]) tag += "-" + columns[countryColIndex];
 			if (columns[continentColIndex]) tag += "-" + columns[continentColIndex];
 			if (columns[idcColIndex]) tag += "-" + columns[idcColIndex];
-
 			if (tag.length == 0) tag += columns[ipColIndex];
 			else tag = tag.slice(1);
 
-			let address = [columns[ipColIndex], port, tag];
+			let address = [atob(pt), columns[ipColIndex], port, tag];
 			addresses.push(address);
 			MAXROW > 0 && maxrow--;
 		}
@@ -1787,7 +1771,8 @@ async function getReProxysFromCsv(csv, onlyTls, DLSstr = 5) {
 	return addresses;
 }
 
-async function getReProxysFromGener(generStr, fakeUserID, fakeHost, onlyTls = true) {
+// 通过第三方订阅器获取代理地址
+async function getProxyBySub(generStr, fakeUserID, fakeHost, onlyTls = true) {
 	if (!generStr || (generStr = generStr.trim()).length == 0) {
 		return [];
 	}
@@ -1810,60 +1795,91 @@ async function getReProxysFromGener(generStr, fakeUserID, fakeHost, onlyTls = tr
 			// 可能是base64编码串
 			let encodeStr = await (await fetchUrl(url, 12000, null, 'v2ray.xray')).text();
 			// 将Base64数据解码
-			encodeStr = (isBase64(encodeStr) ? atob(encodeStr) : encodeStr);
+			encodeStr = (isBase64(encodeStr) ? decodeURIComponent(escape(atob(encodeStr))) : encodeStr);
 			return encodeStr.split('\n');
 		} catch (err) {
 			console.error('解析ProxyGener地址时出错: ' + url, err);
 			return; // 如果有错误，直接返回
 		}
 	}
-	let ips = await fetchConfig(generStr, true, fetch_sub);
+	let ips = await fetchConfig(generStr, fetch_sub);
 
-	return parseAddrLinks(ips, onlyTls, true);
+	return linkAddressParser(ips);
 }
 
-function parseAddrLinks(ips, onlyTls, isVess = false) {
-	// abc.com:端口#节点名
-	// 123.123.123.123:端口#节点名
-	// [abc:1234::1]:端口#节点名
-	const urlReg = /^((?:https?:\/\/)?(?:[\w-]+\.)+[a-z-]+|\d{1,3}(?:\.\d{1,3}){3}|\[[a-f0-9:]+\])(?::(\d+))?(?:#(.+)$)?/i;
-	const vessReg = new RegExp(`^${atob(pt)}://[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}${atob(at)}((?:[\\w-]+\\.)+[a-z-]+|\\d{1,3}(?:\\.\\d{1,3}){3}|\\[[a-f0-9:]+\\]):(\\d+)\\?[^#]+(?:#(.+)$)?`, "i");
+function getProxyByLink(Lisks) {
+	return [];
+}
 
-	return ips.flatMap(ip => {
-		let regExp = urlReg;
-		if (isVess) {
-			regExp = vessReg;
-		}
-		let match = regExp.exec(ip);
-		if (!match) {
+function linkAddressParser(addrs) {
+	// 各种协议
+	const regExp = /^(\w+):\/\/(?:[^@\s]+@)?([^?#\s\/]+)[^#\n]*(?:#(.*))?$/i;
+
+	return addrs.map(addr => {
+		let match = regExp.exec(addr);
+		if (!match || !match[0]) {
 			return;
 		}
 
-		let [, address, port, tag = address] = match;
-		if (isVess) {
-			if (!match[3]) {
-				ip += ((ip.slice(-1) === "#") ? "" : "#") + encodeURIComponent(tag);
+		let host, port, tag, link = match[0];
+		try {
+			switch (match[1]) {
+				case atob("c3Ny"): return;
+				case "http":
+				case "https":
+					break;
+				case atob(ptm):
+					if (!match[2]) throw new Error(`Invalid ${match[1]} address string: ${match[0]}`);
+					({ add: host, port, ps: tag = host } = JSON.parse(decodeURIComponent(escape(atob(match[2])))));
+					break;
+				default:
+					let hostPost = match[2].split(":");
+					if (hostPost.length < 2) {
+						throw new Error(`Invalid ${match[1]} address with no port number: ${match[0]}`);
+					}
+					port = hostPost.pop();
+					if (isNaN(+port)) {
+						throw new Error(`Invalid ${match[1]} address Invalid port number: ${match[0]}`);
+					}
+					host = hostPost.join(":");
+					const regex = /^\[[^\]]+\]$/;
+					if (host.includes(":") && !regex.test(host)) {
+						throw new Error(`Invalid SOCKS v6 address format: ${match[2]}`);
+					}
+					tag = match[3] && decodeURIComponent(match[3]) || host;
 			}
-			return [[address, port, tag, ip]];
+		} catch (err)  {
+			console.warn(err.message);
+			return;
 		}
-		else if (!port) {
-			// 没有设置端口的，根据 CF 默认几个端口返回
-			let res = [];
-			if (!onlyTls) {
-				res = res.concat([[address, "80", tag]]);
-				// res = res.concat(Array.from(HttpPort).map(port => {
-				// 	return [address, port, tag]
-				// }));
-			}
-			res = res.concat([[address, "443", tag]]);
-			// res = res.concat(Array.from(HttpsPort).map(port => {
-			// 	return [address, port, tag]
-			// }));
-			return res;
-		}
-
-		return [[address, port, tag]];
+		return [match[1], host, port, tag, link];
 	}).filter(Boolean);
+}
+
+async function fetchConfig(config_str, resolve = null, outTime = 8000) {
+	// 避免 api:// 的链接调用循环
+	let apiReference = new Set();
+	let inner = async function (config_str) {
+		return (await Promise.all(config_str.trim().split(/[\n,]+/).map(v => v.trim()).map(async str => {
+			// 前面是# 号的是忽略的配置
+			if (str.charAt(0) === '#') return;
+			if (str.startsWith("api://")) {
+				let furl = str.slice(6);
+				try {
+					let resp = await (await fetchUrl(furl, outTime, apiReference)).text();
+					// 回调处理文件有 api://  的链接
+					return inner(resp);
+				} catch (err) {
+					console.error('获取地址时出错: ' + str, err.message);
+					return; // 如果有错误，直接返回
+				}
+			}
+			// 不是 api:// 开头看是否需要进一步处理
+			return typeof resolve === 'function' ? resolve(str) : str;
+		}))).flat().filter(Boolean).map(ip => ip.trim());
+	}
+
+	return inner(config_str);
 }
 
 /**

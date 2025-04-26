@@ -111,6 +111,7 @@ jobs:
             ADD
             SUB
             CSV
+            LINKS
             DLSstr
             ACL4SSR_CONFIG
             SUBCONVER
@@ -122,6 +123,7 @@ jobs:
           ADD: ${{ vars.ADD }}
           SUB: ${{ vars.SUB }}
           CSV: ${{ vars.CSV }}
+          LINKS: ${{ vars.LINKS }}
           DLSstr: ${{ vars.DLSstr }}
           ACL4SSR_CONFIG: ${{ vars.ACL4SSR_CONFIG }}
           SUBCONVER: ${{ vars.SUBCONVER }}
