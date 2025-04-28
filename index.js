@@ -124,8 +124,6 @@ export default {
 						return GenSub(args);
 					case pathname === `/bestip/${userID_Path}`:
 						return fetch(`https://bestip.06151953.xyz/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
-					// 以下不能正常执行，不能引用项目自身
-					// return fetchUrl(`https://${host}/${userID_Path}?cfproxygener=bestip.06151953.xyz`, 0, null, userAgent);
 					default:
 						// if (env.URL_FORWARD) return handleForward(env, request);
 						return new Response(`<html>
@@ -1416,7 +1414,7 @@ async function GenSub({ userID, host, userAgent, url, ENV }) {
 	// 是否是第三方后端订阅转换服务请求 https://${host}/convertersubrequest
 	let isSubReq = url.pathname.toLowerCase().startsWith("/convertersubrequest");
 	let hasProxyParams = false;
-	if (url.searchParams.has("cfproxylist") || url.searchParams.has("cfproxycsv") || url.searchParams.has("cfproxysub")) {
+	if (url.searchParams.has("cfproxylist") || url.searchParams.has("cfproxycsv") || url.searchParams.has("proxysub")) {
 		hasProxyParams = true;
 	}
 
@@ -1469,12 +1467,11 @@ async function GenSub({ userID, host, userAgent, url, ENV }) {
 &config=${encodeURIComponent(subConverterMode)}&udp=true&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
 
 		try {
-			let response = await fetchUrl(ffetch, 16000, null, userAgent);
+			let respText = await fetchApiWrapper(ffetch, 16000, null, userAgent);
 			// 还原假信息为真
-			return new Response((await response.text()).replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host), {
-				status: response.status,
-				statusText: response.statusText,
-				headers: response.headers
+			return new Response(respText.replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host), {
+				status: 200,
+				headers: { "Content-Type": "text/plain; charset=utf-8" },
 			});
 		} catch (err) {
 			console.error('请求subconverter地址时出错: ' + ffetch, err);
@@ -1524,6 +1521,7 @@ async function GenSub({ userID, host, userAgent, url, ENV }) {
 		CSV = "";
 		// 优选生成器
 		SUB = "";
+		// 各种协议代理地址
 		LINKS = "";
 
 		if (url.searchParams.get("cfproxylist")) {
@@ -1532,39 +1530,39 @@ async function GenSub({ userID, host, userAgent, url, ENV }) {
 		if (url.searchParams.get("cfproxycsv")) {
 			CSV = url.searchParams.get("cfproxycsv");
 		}
-		if (url.searchParams.get("cfproxysub")) {
-			SUB = url.searchParams.get("cfproxysub");
+		if (url.searchParams.get("proxysub")) {
+			SUB = url.searchParams.get("proxysub");
 		}
 	}
 
 	if (ADD) {
-		let res = await getCfRevRowByText(ADD, onlyTls);
+		let res = await processCfRevRowByText(ADD, onlyTls);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
 	}
 	if (CSV) {
-		let res = await getCfRevByCsv(CSV, onlyTls, DLSstr);
+		let res = await processCfRevByCsv(CSV, onlyTls, DLSstr);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
 	}
 	if (SUB) {
-		let res = await getProxyBySub(SUB, fakeUserID, fakeHost, onlyTls);
+		let res = await processProxyBySub(SUB, fakeUserID, fakeHost, onlyTls);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
 	}
 
 	if (LINKS) {
-		let res = getProxyByLink(LINKS);
+		let res = await processProxyByLink(LINKS);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
 	}
 
 	// 这里query proxyip 会多一个api请求获取proxyip过程
-	// let [proxyIP, proxyPort] = await processProxyip(url, PROXYIP, host, true);
+	// let [proxyIP, proxyPort] = await processProxyip(url, PROXYIP);
 	// &path=${encodeURIComponent("/?ed=2560&proxyip=" + proxyIP + ":" + proxyPort)}
 
 	// 如果是isSubReq，需要设置替换为假信息， 根据 address:port 去重， tag相同+1递增
@@ -1612,11 +1610,11 @@ abc.com:端口#节点名
 123.123.123.123:端口#节点名
 [abc:1234::1]:端口#节点名
 */
-async function getCfRevRowByText(add, onlyTls) {
+async function processCfRevRowByText(add, onlyTls) {
 	if (!add || (add = add.trim()).length == 0) {
 		return [];
 	}
-	let ips = await fetchConfig(add);
+	let ips = await fetchRowApi(add);
 	const regExp = /^((?:[\w-]+\.)+[a-z-]+|\d{1,3}(?:\.\d{1,3}){3}|\[[a-f0-9:]+\])(?::(\d+))?(?:#(.+)$)?/i;
 
 	return ips.map(ip => {
@@ -1627,9 +1625,9 @@ async function getCfRevRowByText(add, onlyTls) {
 		let [, host, port, tag = host] = match;
 		if (!port) {
 			// 没有设置端口的，根据 CF 默认端口返回
-			if (!onlyTls) {
-				port = "80";
-			}
+			// if (!onlyTls) {
+			// 	port = "80";
+			// }
 			port = "443";
 		}
 
@@ -1638,7 +1636,7 @@ async function getCfRevRowByText(add, onlyTls) {
 }
 
 // 通过csv文件获取cf代理IP
-async function getCfRevByCsv(csv, onlyTls, DLSstr = 5) {
+async function processCfRevByCsv(csv, onlyTls, DLSstr = 5) {
 	if (!csv || (csv = csv.trim()).length == 0) {
 		return [];
 	}
@@ -1691,7 +1689,7 @@ async function getCfRevByCsv(csv, onlyTls, DLSstr = 5) {
 				}
 
 				tlsColIndex = header.indexOf('tls');
-				countryColIndex = header.findIndex(str => str.includes('国家'));
+				countryColIndex = header.findIndex(str => str.includes('国家') || str.includes('country'));
 				cityColIndex = header.findIndex(str => str.includes('城市') || str.includes('city'));
 				speedColIndex = header.findLastIndex(item => item.includes("速度") || item.includes("speed"));
 				idcColIndex = header.findLastIndex(item => item.includes("数据中心") || item.includes("idc"));
@@ -1756,12 +1754,12 @@ async function getCfRevByCsv(csv, onlyTls, DLSstr = 5) {
 	}
 
 	let csvUrls = csv.split(/[,\s]+/);
-	// 避免 api:// 的链接调用循环
-	let apiReference = new Set();
+	// 避免api 链接调用循环
+	let apiAvoidDupRef = new Set();
 	for (let furl of csvUrls) {
 		try {
-			let resp = await (await fetchUrl(furl, 12000, apiReference)).text();
-			handleCSV(resp);
+			let res = await fetchApiWrapper(furl, 12000, apiAvoidDupRef);
+			handleCSV(res);
 		} catch (err) {
 			console.error('获取地址时出错: ' + furl, err.message);
 			return []; // 如果有错误，直接返回
@@ -1772,8 +1770,8 @@ async function getCfRevByCsv(csv, onlyTls, DLSstr = 5) {
 }
 
 // 通过第三方订阅器获取代理地址
-async function getProxyBySub(generStr, fakeUserID, fakeHost, onlyTls = true) {
-	if (!generStr || (generStr = generStr.trim()).length == 0) {
+async function processProxyBySub(subapi, fakeUserID, fakeHost, onlyTls = true) {
+	if (!subapi || (subapi = subapi.trim()).length == 0) {
 		return [];
 	}
 
@@ -1786,37 +1784,47 @@ async function getProxyBySub(generStr, fakeUserID, fakeHost, onlyTls = true) {
 		}
 		// 一个Gener 生成的订阅地址够大，所以只允许3个
 		if (generNum.has(sub) || generNum.size >= 3) {
-			return;
+			return [];
 		}
 		generNum.add(sub);
 
 		let url = `${sub}/sub?host=${fakeHost}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2560")}`;
 		try {
 			// 可能是base64编码串
-			let encodeStr = await (await fetchUrl(url, 12000, null, 'v2ray.xray')).text();
+			let encodeStr = await fetchApiWrapper(url, 12000, null, 'v2rayn.xray');
 			// 将Base64数据解码
 			encodeStr = (isBase64(encodeStr) ? decodeURIComponent(escape(atob(encodeStr))) : encodeStr);
 			return encodeStr.split('\n');
 		} catch (err) {
 			console.error('解析ProxyGener地址时出错: ' + url, err);
-			return; // 如果有错误，直接返回
+			return []; // 如果有错误，直接返回
 		}
 	}
-	let ips = await fetchConfig(generStr, fetch_sub);
+	let links = await fetchRowApi(subapi).then(async data => (await Promise.all(data.map(m => fetch_sub(m)))).flat().filter(Boolean));
 
-	return linkAddressParser(ips);
+	return linkPageParser(links);
 }
 
-function getProxyByLink(Lisks) {
-	return [];
+async function processProxyByLink(links) {
+	if (!links || (links = links.trim()).length == 0) {
+		return [];
+	}
+	// 避免 link 的链接循环调用
+	let apiAvoidDupRef = new Set();
+	let ips = await fetchRowApi(links, 20000, 'v2rayn.xray', apiAvoidDupRef, "http", true);
+
+	return linkPageParser(ips);
 }
 
-function linkAddressParser(addrs) {
-	// 各种协议
-	const regExp = /^(\w+):\/\/(?:[^@\s]+@)?([^?#\s\/]+)[^#\n]*(?:#(.*))?$/i;
+async function linkPageParser(addrs, parserHttp = false, apiAvoidDupRef = null) {
+	if (!addrs || addrs.length == 0) {
+		return [];
+	}
+	// 各种代理协议
+	const regExp = /^(\w+):\/\/(?:[^@\s]+@)?([^?#\s\/]+)[^#\n]*(?:#(.*))?$/;
 
-	return addrs.map(addr => {
-		let match = regExp.exec(addr);
+	return (await Promise.allSettled(addrs.map(async addr => {
+		let match = regExp.exec(addr.trim());
 		if (!match || !match[0]) {
 			return;
 		}
@@ -1827,7 +1835,11 @@ function linkAddressParser(addrs) {
 				case atob("c3Ny"): return;
 				case "http":
 				case "https":
-					break;
+					if (!parserHttp) {
+						return;
+					}
+					let text = fetchRowApi(link, 12000, 'v2rayn.xray', apiAvoidDupRef, "http", true);
+					return linkPageParser(text, parserHttp, apiAvoidDupRef);
 				case atob(ptm):
 					if (!match[2]) throw new Error(`Invalid ${match[1]} address string: ${match[0]}`);
 					({ add: host, port, ps: tag = host } = JSON.parse(decodeURIComponent(escape(atob(match[2])))));
@@ -1848,38 +1860,61 @@ function linkAddressParser(addrs) {
 					}
 					tag = match[3] && decodeURIComponent(match[3]) || host;
 			}
-		} catch (err)  {
+		} catch (err) {
 			console.warn(err.message);
 			return;
 		}
-		return [match[1], host, port, tag, link];
-	}).filter(Boolean);
+		return [[match[1], host, port, tag, link]];
+	}))).flatMap(m => m.status === "fulfilled" ? m.value : undefined).filter(Boolean);
 }
 
-async function fetchConfig(config_str, resolve = null, outTime = 8000) {
-	// 避免 api:// 的链接调用循环
-	let apiReference = new Set();
-	let inner = async function (config_str) {
-		return (await Promise.all(config_str.trim().split(/[\n,]+/).map(v => v.trim()).map(async str => {
+async function fetchRowApi(configs, apiOutTime = 8000, ua, apiAvoidDupRef = new Set(), apiFlag = "api", base64Decoder = false) {
+	// apiAvoidDupRef 避免 apiFlag 的链接调用循环
+	let inner = async function (configs) {
+		if (!Array.isArray(configs)) {
+			if (base64Decoder) {
+				// 将Base64数据解码
+				configs = isBase64(configs) ? decodeURIComponent(escape(atob(configs))) : configs;
+			}
+			configs = configs.trim().split(/[\n,]+/);
+		}
+		return (await Promise.allSettled(configs.map(async str => {
 			// 前面是# 号的是忽略的配置
+			str = str.trim();
 			if (str.charAt(0) === '#') return;
-			if (str.startsWith("api://")) {
-				let furl = str.slice(6);
+			let needfetch = false, flag_len = 0;
+			if (apiFlag == "api" && str.startsWith("api://")) {
+				needfetch = true;
+				flag_len = 6;
+			}
+			else if (apiFlag == "http" && str.startsWith("https://")) {
+				needfetch = true;
+				flag_len = 8;
+			}
+			else if (apiFlag == "http" && str.startsWith("http://")) {
+				needfetch = true;
+				flag_len = 7;
+			}
+			if (needfetch) {
+				let furl = str.slice(flag_len);
 				try {
-					let resp = await (await fetchUrl(furl, outTime, apiReference)).text();
-					// 回调处理文件有 api://  的链接
-					return inner(resp);
+					let res = await fetchApiWrapper(furl, apiOutTime, apiAvoidDupRef, ua);
+					// 回调处理文件有 http 的链接
+					return inner(res);
 				} catch (err) {
 					console.error('获取地址时出错: ' + str, err.message);
 					return; // 如果有错误，直接返回
 				}
 			}
-			// 不是 api:// 开头看是否需要进一步处理
-			return typeof resolve === 'function' ? resolve(str) : str;
-		}))).flat().filter(Boolean).map(ip => ip.trim());
+			return str;
+		}))).flatMap(data => {
+			if (data.status == "fulfilled") {
+				return data.value?.trim();
+			}
+		}).filter(Boolean);
 	}
 
-	return inner(config_str);
+	return inner(configs);
 }
 
 /**
@@ -1887,10 +1922,10 @@ async function fetchConfig(config_str, resolve = null, outTime = 8000) {
  * @param {string} furl
  * @param {number} [outTime=0]
  * @param {Set} [apiAvoidDupRef=null]
- * @param {string} [UA="Mozilla/5.0 Chrome/131.0.0.0"]
- * @returns {Promise<Response>} fetch content
+ * @param {string} [ua="Mozilla/5.0 Chrome/131.0.0.0"]
+ * @returns {Promise<string>} fetch text content
  */
-function fetchUrl(furl, outTime = 0, apiAvoidDupRef = null, UA = "Mozilla/5.0 Chrome/131.0.0.0") {
+function fetchApiWrapper(furl, outTime = 0, apiAvoidDupRef = null, ua = "Mozilla/5.0 Chrome/131.0.0.0") {
 	let converSplit = furl.split("://");
 	if (converSplit.length < 2) {
 		furl = "https://" + converSplit[0];
@@ -1908,14 +1943,14 @@ function fetchUrl(furl, outTime = 0, apiAvoidDupRef = null, UA = "Mozilla/5.0 Ch
 		abortc = new AbortController();
 		id = setTimeout(() => abortc.abort(), outTime);
 	}
-	const resp = fetch(furl, {
+	const prom = fetch(furl, {
 		method: 'get',
 		headers: {
 			'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
-			'User-Agent': UA
+			'User-Agent': ua
 		},
 		signal: abortc?.signal,
-	}).finally(() => {
+	}).then(resp => resp.text()).finally(() => {
 		id && clearTimeout(id);
 	}).catch(error => {
 		if (error.name === 'AbortError') {
@@ -1924,7 +1959,7 @@ function fetchUrl(furl, outTime = 0, apiAvoidDupRef = null, UA = "Mozilla/5.0 Ch
 		throw error;
 	});
 
-	return resp;
+	return prom;
 }
 
 function generateRandomUUID() {
@@ -1939,13 +1974,15 @@ function generateRandomStr(len) {
 	return Math.random().toString(36).substring(2, len);
 }
 
-function isBase64(str) {
-	if (!str || str.length % 4 !== 0) {
-		return false;
+const isBase64 = (() => {
+	const regex = /^[A-Za-z0-9+/-_]+={0,2}$/;
+	return (str) => {
+		if (!str || str.length % 4 !== 0) return false;
+		if (!regex.test(str)) return false;
+		try {
+			return btoa(atob(str)) === str;
+		} catch {
+			return false;
+		}
 	}
-	try {
-		return btoa(atob(str)) === str;
-	} catch (err) {
-		return false;
-	}
-}
+})();
