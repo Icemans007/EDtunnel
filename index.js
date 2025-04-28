@@ -1909,7 +1909,7 @@ async function fetchRowApi(configs, apiOutTime = 8000, ua, apiAvoidDupRef = new 
 			return str;
 		}))).flatMap(data => {
 			if (data.status == "fulfilled") {
-				return data.value?.trim();
+				return data.value;
 			}
 		}).filter(Boolean);
 	}
