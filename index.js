@@ -1821,7 +1821,7 @@ async function linkPageParser(addrs, parserHttp = false, apiAvoidDupRef = null) 
 		return [];
 	}
 	// 各种代理协议
-	const regExp = /^(\w+):\/\/(?:[^@\s]+@)?([^?#\s\/]+)[^#\n]*(?:#(.*))?$/;
+	const regExp = /^(\w+):\/\/(?:[^@\s]+@)?([^?#\s\/]+)[^#\s]*(?:#(.*))?$/;
 
 	return (await Promise.allSettled(addrs.map(async addr => {
 		let match = regExp.exec(addr.trim());
