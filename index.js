@@ -1131,7 +1131,7 @@ const ed = atob('UlVSMGRXNXVaV3c9');
  * @returns {string} Configuration HTML
  */
 function getConfig(userID, hostName) {
-	const randomPath = () => '/' + Math.random().toString(36).substring(2, 15) + '?ed=2560';
+	const randomPath = () => '/' + Math.random().toString(36).substring(2, 15) + '?ed=2048';
 	const commonUrlPartHttp = `?encryption=none&security=none&fp=chrome&type=ws&host=${hostName}&path=${encodeURIComponent(randomPath())}#`;
 	const commonUrlPartHttps = `?encryption=none&security=tls&sni=${hostName}&fp=chrome&type=ws&host=${hostName}&path=%2F%3Fed%3D2560#`;
 
@@ -1309,7 +1309,7 @@ function getConfig(userID, hostName) {
     sni: ${hostName}
     client-fingerprint: chrome
     ws-opts:
-    path: "/?ed=2560"
+    path: "/?ed=2048"
     headers:
       host: ${hostName}`;
 		}));
@@ -1332,7 +1332,7 @@ function getConfig(userID, hostName) {
     sni: ${hostName}
     client-fingerprint: chrome
     ws-opts:
-    path: "/?ed=2560"
+    path: "/?ed=2048"
     headers:
       host: ${hostName}`;
 			}));
@@ -1563,7 +1563,7 @@ async function GenSub({ userID, host, userAgent, url, ENV }) {
 
 	// 这里query proxyip 会多一个api请求获取proxyip过程
 	// let [proxyIP, proxyPort] = await processProxyip(url, PROXYIP);
-	// &path=${encodeURIComponent("/?ed=2560&proxyip=" + proxyIP + ":" + proxyPort)}
+	// &path=${encodeURIComponent("/?ed=2048&proxyip=" + proxyIP + ":" + proxyPort)}
 
 	// 如果是isSubReq，需要设置替换为假信息， 根据 address:port 去重， tag相同+1递增
 	let uniqueTags = new Map(Array.from(new Set(addresses.map(m => m[3]))).map(a => [a, 0]));
@@ -1582,18 +1582,18 @@ async function GenSub({ userID, host, userAgent, url, ENV }) {
 			let tmpHost = isSubReq ? fakeHost : host;
 			// 没有 url_arr[4] 是 v l ess
 			let link = url_arr[4] || `${atob(pt)}://${tmpUserID}${atob(at)}${url_arr[1]}:${url_arr[2]}?encryption=none\
-&type=ws${onlyTls ? "&security=tls" : ""}&host=${tmpHost}&sni=${tmpHost}&path=${encodeURIComponent("/?ed=2560")}#${encodeURIComponent(url_arr[3])}`;
+&type=ws${onlyTls ? "&security=tls" : ""}&host=${tmpHost}&sni=${tmpHost}&path=${encodeURIComponent("/?ed=2048")}#${encodeURIComponent(url_arr[3])}`;
 
 			if (!isSubReq && url_arr[4]?.includes(fakeUserID) && url_arr[4]?.includes(fakeHost)) {
 				link = url_arr[4].replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host);
 			}
 
 			// 相同 tagname 递增
-			let num = uniqueTags.get(url_arr[3]);
-			uniqueTags.set(url_arr[3], ++num);
-			if (num > 1) {
-				link += `%20${num}`;
-			}
+			// let num = uniqueTags.get(url_arr[3]);
+			// uniqueTags.set(url_arr[3], ++num);
+			// if (num > 1) {
+			// 	link += `%20${num}`;
+			// }
 			accMap.set(uniqueAddr, [url_arr[3], link]);
 		}
 		return accMap;
@@ -1788,7 +1788,7 @@ async function processProxyBySub(subapi, fakeUserID, fakeHost, onlyTls = true) {
 		}
 		generNum.add(sub);
 
-		let url = `${sub}/sub?host=${fakeHost}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2560")}`;
+		let url = `${sub}/sub?host=${fakeHost}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2048")}`;
 		try {
 			// 可能是base64编码串
 			let encodeStr = await fetchApiWrapper(url, 12000, null, 'v2rayn.xray');
