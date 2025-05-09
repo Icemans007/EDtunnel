@@ -1565,7 +1565,7 @@ async function GenSub({ userID, host, userAgent, url, ENV }) {
 	// let [proxyIP, proxyPort] = await processProxyip(url, PROXYIP);
 	// &path=${encodeURIComponent("/?ed=2048&proxyip=" + proxyIP + ":" + proxyPort)}
 
-	// 如果是isSubReq，需要设置替换为假信息， 根据 address:port 去重， tag相同+1递增
+	// 根据 tagname 去重， tagname相同+1递增
 	let uniqueTags = new Map(Array.from(new Set(addresses.map(m => m[3]))).map(a => [a, 0]));
 
 	let linkes = addresses.reduce((accMap, url_arr) => {
@@ -1589,11 +1589,11 @@ async function GenSub({ userID, host, userAgent, url, ENV }) {
 			}
 
 			// 相同 tagname 递增
-			// let num = uniqueTags.get(url_arr[3]);
-			// uniqueTags.set(url_arr[3], ++num);
-			// if (num > 1) {
-			// 	link += `%20${num}`;
-			// }
+			let num = uniqueTags.get(url_arr[3]);
+			uniqueTags.set(url_arr[3], ++num);
+			if (num > 1) {
+				link += `%20${num}`;
+			}
 			accMap.set(uniqueAddr, [url_arr[3], link]);
 		}
 		return accMap;
