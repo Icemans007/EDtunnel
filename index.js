@@ -18,12 +18,12 @@ const proxyIPs = ['cdn.xn--b6gac.eu.org:443', 'cdn-all.xn--b6gac.eu.org:443'];
 
 // Randomly select a proxy server from the pool
 let proxyIpPort = proxyIPs[Math.floor(Math.random() * proxyIPs.length)];
-let proxyIP = proxyIpPort.split(':')[0];
-let proxyPort = proxyIpPort.split(':')[1] || '443';
+let proxyIP = proxyIpPort?.split(':')[0];
+let proxyPort = proxyIpPort?.split(':')[1] || '443';
 
 // Alternative configurations:
 // Single proxy IP: let proxyIP = 'cdn.xn--b6gac.eu.org';
-// IPv6 example: let proxyIP = "[2a01:4f8:c2c:123f:64:5:6810:c55a]"
+// IPv6 example: let proxyIP = "[2a01::5:6810:c55a]"
 
 /**
  * SOCKS5 proxy configuration
@@ -42,8 +42,6 @@ let enableSocks = false;
 
 // 是否禁止非TLS
 let onlyTls = false;
-const HttpPort = new Set([80, 8080, 8880, 2052, 2086, 2095, 2082]);
-const HttpsPort = new Set([443, 8443, 2053, 2096, 2087, 2083]);
 
 /**
  * Main handler for the Cloudflare Worker. Processes incoming requests and routes them appropriately.
@@ -100,7 +98,7 @@ export default {
 				if (pathname.length > 1 && pathname.slice(-1) === '/') {
 					pathname = pathname.slice(0, -1);
 				}
-				let userID_Path = userID.split(',').find(uuid => pathname.includes(uuid)) || "";
+				const userID_Path = userID.split(',').find(uuid => pathname.includes(uuid)) || "";
 
 				switch (true) {
 					case pathname === '/':
@@ -163,7 +161,7 @@ export default {
  */
 function processProxyip(url, PROXYIP) {
 	let iproxyIP, iproxyPort;
-	let requestProxyip = url.searchParams.get("proxyip") || url.searchParams.get("pyip");
+	const requestProxyip = url.searchParams.get("proxyip") || url.searchParams.get("pyip");
 
 	if (requestProxyip || PROXYIP) {
 		// Split PROXYIP into an array of proxy addresses
@@ -1132,8 +1130,8 @@ const ed = atob('UlVSMGRXNXVaV3c9');
  */
 function getConfig(userID, hostName) {
 	const randomPath = () => '/' + Math.random().toString(36).substring(2, 15) + '?ed=2048';
-	const commonUrlPartHttp = `?encryption=none&security=none&fp=chrome&type=ws&host=${hostName}&path=${encodeURIComponent(randomPath())}#`;
-	const commonUrlPartHttps = `?encryption=none&security=tls&sni=${hostName}&fp=chrome&type=ws&host=${hostName}&path=%2F%3Fed%3D2560#`;
+	const commonUrlPartHttp = `?security=none&fp=chrome&type=ws&host=${hostName}&path=${encodeURIComponent(randomPath())}#`;
+	const commonUrlPartHttps = `?security=tls&sni=${hostName}&fp=chrome&type=ws&host=${hostName}&path=${encodeURIComponent(randomPath())}#`;
 
 	// Prepare output string for userID
 	const sublink = `https://${hostName}/${userID}`;
@@ -1292,12 +1290,12 @@ function getConfig(userID, hostName) {
 		let vessPart = [];
 		let crashPart = ["proxies:"];
 
-		vessPart = vessPart.concat(Array.from(HttpsPort).map(port => {
+		vessPart = vessPart.concat([443].map(port => {
 			const urlPart = encodeURIComponent(`${hostName}-HTTPS-${port}`);
 			return atob(pt) + '://' + userID + atob(at) + hostName + ':' + port + commonUrlPartHttps + urlPart;
 		}));
 
-		crashPart = crashPart.concat(Array.from(HttpsPort).map(port => {
+		crashPart = crashPart.concat([443].map(port => {
 			return `  - name: ${hostName}-HTTPS-${port}
     server: ${hostName}
     port: ${port}
@@ -1315,12 +1313,12 @@ function getConfig(userID, hostName) {
 		}));
 
 		if (!onlyTls) {
-			vessPart = vessPart.concat(Array.from(HttpPort).map(port => {
+			vessPart = vessPart.concat([80].map(port => {
 				const urlPart = encodeURIComponent(`${hostName}-HTTP-${port}`);
 				return atob(pt) + '://' + userID + atob(at) + hostName + ':' + port + commonUrlPartHttp + urlPart;
 			}));
 
-			crashPart = crashPart.concat(Array.from(HttpPort).map(port => {
+			crashPart = crashPart.concat([80].map(port => {
 				return `  - name: ${hostName}-HTTP-${port}
     server: ${hostName}
     port: ${port}
@@ -1397,7 +1395,7 @@ async function GenSub({ userID, host, userAgent, url, ENV }) {
 	// 订阅链接转换 crash/sing-box 的服务器后端地址
 	let subconverter = SUBCONVER;
 	// 订阅转换配置文件
-	let subConverterMode = ACL4SSR_CONFIG || "https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/refs/heads/master/Clash/config/ACL4SSR_Online.ini";
+	const subConverterMode = ACL4SSR_CONFIG || "https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/refs/heads/master/Clash/config/ACL4SSR_Online.ini";
 
 	let target = "";
 	if (url.searchParams.has('sub')) {
@@ -1412,7 +1410,7 @@ async function GenSub({ userID, host, userAgent, url, ENV }) {
 	}
 
 	// 是否是第三方后端订阅转换服务请求 https://${host}/convertersubrequest
-	let isSubReq = url.pathname.toLowerCase().startsWith("/convertersubrequest");
+	const isSubReq = url.pathname.toLowerCase().startsWith("/convertersubrequest");
 	let hasProxyParams = false;
 	if (url.searchParams.has("cfproxylist") || url.searchParams.has("cfproxycsv") || url.searchParams.has("proxysub")) {
 		hasProxyParams = true;
@@ -1451,7 +1449,7 @@ async function GenSub({ userID, host, userAgent, url, ENV }) {
 		}
 
 		// 连接协议
-		let subconverSplit = subconverter.split("://");
+		const subconverSplit = subconverter.split("://");
 		if (subconverSplit.length < 2) {
 			// 有时候是本地服务，所以默认是非TLS
 			subconverter = "http://" + subconverSplit[0];
@@ -1463,11 +1461,11 @@ async function GenSub({ userID, host, userAgent, url, ENV }) {
 			suburl = `https://${host}/convertersubrequest${url.search}&`;
 		}
 		suburl += `token=${btoa(fakeUserID + "@" + fakeHost)}`;
-		let ffetch = `${subconverter}/sub?target=${target}&url=${encodeURIComponent(suburl)}&insert=false\
+		const ffetch = `${subconverter}/sub?target=${target}&url=${encodeURIComponent(suburl)}&insert=false\
 &config=${encodeURIComponent(subConverterMode)}&udp=true&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
 
 		try {
-			let respText = await fetchApiWrapper(ffetch, 16000, null, userAgent);
+			const respText = await fetchApiWrapper(ffetch, 16000, null, userAgent);
 			// 还原假信息为真
 			return new Response(respText.replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host), {
 				status: 200,
@@ -1495,7 +1493,7 @@ async function GenSub({ userID, host, userAgent, url, ENV }) {
 			});
 		}
 
-		let token = atob(url.searchParams.get('token')).split('@');
+		const token = atob(url.searchParams.get('token')).split('@');
 		if (token.length !== 2) {
 			return new Response(new Error("Illegal Requests").message, {
 				status: 403,
@@ -1536,53 +1534,53 @@ async function GenSub({ userID, host, userAgent, url, ENV }) {
 	}
 
 	if (ADD) {
-		let res = await processCfRevRowByText(ADD, onlyTls);
+		const res = await processCfRevRowByText(ADD, onlyTls);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
 	}
 	if (CSV) {
-		let res = await processCfRevByCsv(CSV, onlyTls, DLSstr);
+		const res = await processCfRevByCsv(CSV, onlyTls, DLSstr);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
 	}
 	if (SUB) {
-		let res = await processProxyBySub(SUB, fakeUserID, fakeHost, onlyTls);
+		const res = await processProxyBySub(SUB, fakeUserID, fakeHost, onlyTls);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
 	}
 
 	if (LINKS) {
-		let res = await processProxyByLink(LINKS);
+		const res = await processProxyByLink(LINKS);
 		if (res.length > 0) {
 			addresses = addresses.concat(res);
 		}
 	}
 
 	// 这里query proxyip 会多一个api请求获取proxyip过程
-	// let [proxyIP, proxyPort] = await processProxyip(url, PROXYIP);
+	// const [proxyIP, proxyPort] = await processProxyip(url, PROXYIP);
 	// &path=${encodeURIComponent("/?ed=2048&proxyip=" + proxyIP + ":" + proxyPort)}
 
 	// 根据 tagname 去重， tagname相同+1递增
-	let uniqueTags = new Map(Array.from(new Set(addresses.map(m => m[3]))).map(a => [a, 0]));
+	const uniqueTags = new Map(Array.from(new Set(addresses.map(m => m[3]))).map(a => [a, 0]));
 
-	let linkes = addresses.reduce((accMap, url_arr) => {
+	const linkes = addresses.reduce((accMap, url_arr) => {
 		// url_arr[0] ==> protocol
 		// url_arr[1] ==> address
 		// url_arr[2] ==> port
 		// url_arr[3] ==> tagname
 		// url_arr[4] ==> 完整链接,可能为undefined, 当不为undefined时，要按需（!isSubReq）将fakeUserID、fakeHost 还原
 		// 利用 uniqueAddr【protocol:address:port】去重
-		let uniqueAddr = url_arr[0] + ":" + url_arr[1] + ":" + url_arr[2];
-		let old = accMap.get(uniqueAddr);
+		const uniqueAddr = url_arr[0] + ":" + url_arr[1] + ":" + url_arr[2];
+		const old = accMap.get(uniqueAddr);
 		if (!(old && [...old[0]].length >= [...url_arr[3]].length)) {
-			let tmpUserID = isSubReq ? fakeUserID : userID;
-			let tmpHost = isSubReq ? fakeHost : host;
+			const tmpUserID = isSubReq ? fakeUserID : userID;
+			const tmpHost = isSubReq ? fakeHost : host;
 			// 没有 url_arr[4] 是 v l ess
-			let link = url_arr[4] || `${atob(pt)}://${tmpUserID}${atob(at)}${url_arr[1]}:${url_arr[2]}?encryption=none\
-&type=ws${onlyTls ? "&security=tls" : ""}&host=${tmpHost}&sni=${tmpHost}&path=${encodeURIComponent("/?ed=2048")}#${encodeURIComponent(url_arr[3])}`;
+			let link = url_arr[4] || `${atob(pt)}://${tmpUserID}${atob(at)}${url_arr[1]}:${url_arr[2]}?\
+type=ws${onlyTls ? "&security=tls" : ""}&host=${tmpHost}&sni=${tmpHost}&path=${encodeURIComponent("/?ed=2048")}#${encodeURIComponent(url_arr[3])}`;
 
 			if (!isSubReq && url_arr[4]?.includes(fakeUserID) && url_arr[4]?.includes(fakeHost)) {
 				link = url_arr[4].replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host);
@@ -1614,11 +1612,11 @@ async function processCfRevRowByText(add, onlyTls) {
 	if (!add || (add = add.trim()).length == 0) {
 		return [];
 	}
-	let ips = await fetchRowApi(add);
+	const ips = await fetchRowApi(add);
 	const regExp = /^((?:[\w-]+\.)+[a-z-]+|\d{1,3}(?:\.\d{1,3}){3}|\[[a-f0-9:]+\])(?::(\d+))?(?:#(.+)$)?/i;
 
 	return ips.map(ip => {
-		let match = regExp.exec(ip);
+		const match = regExp.exec(ip);
 		if (!match) {
 			return;
 		}
@@ -1643,7 +1641,7 @@ async function processCfRevByCsv(csv, onlyTls, DLSstr = 5) {
 
 	// csv 数据太多，默认是排序的，每个CSV表格只获取符合条件的前8条
 	const [DLS = 5, MAXROW = 8] = String(DLSstr).split(":").map(d => isFinite(+d) ? +d : undefined);
-	let addresses = [];
+	const addresses = [];
 
 	const handleCSV = function (lines) {
 		lines = lines.split('\n').map(txt => txt.trim()).filter(Boolean);
@@ -1708,7 +1706,7 @@ async function processCfRevByCsv(csv, onlyTls, DLSstr = 5) {
 			if (MAXROW > 0 && maxrow < 1) {
 				continue;
 			}
-			let columns = lines[i].split(',').map(txt => txt.trim());
+			const columns = lines[i].split(',').map(txt => txt.trim());
 			if (columns.length !== header.length) {
 				console.warn('CSV文件数据错乱');
 				return;
@@ -1747,18 +1745,18 @@ async function processCfRevByCsv(csv, onlyTls, DLSstr = 5) {
 			if (tag.length == 0) tag += columns[ipColIndex];
 			else tag = tag.slice(1);
 
-			let address = [atob(pt), columns[ipColIndex], port, tag];
+			const address = [atob(pt), columns[ipColIndex], port, tag];
 			addresses.push(address);
 			MAXROW > 0 && maxrow--;
 		}
 	}
 
-	let csvUrls = csv.split(/[,\s]+/);
+	const csvUrls = csv.split(/[,\s]+/);
 	// 避免api 链接调用循环
-	let apiAvoidDupRef = new Set();
-	for (let furl of csvUrls) {
+	const apiAvoidDupRef = new Set();
+	for (const furl of csvUrls) {
 		try {
-			let res = await fetchApiWrapper(furl, 12000, apiAvoidDupRef);
+			const res = await fetchApiWrapper(furl, 12000, apiAvoidDupRef);
 			handleCSV(res);
 		} catch (err) {
 			console.error('获取地址时出错: ' + furl, err.message);
@@ -1775,10 +1773,10 @@ async function processProxyBySub(subapi, fakeUserID, fakeHost, onlyTls = true) {
 		return [];
 	}
 
-	let generNum = new Set();
-	let fetch_sub = async function (sub) {
+	const generNum = new Set();
+	const fetch_sub = async function (sub) {
 		// 订阅器地址
-		let converSplit = sub.split("://");
+		const converSplit = sub.split("://");
 		if (converSplit.length < 2) {
 			sub = "https://" + converSplit[0];
 		}
@@ -1788,7 +1786,7 @@ async function processProxyBySub(subapi, fakeUserID, fakeHost, onlyTls = true) {
 		}
 		generNum.add(sub);
 
-		let url = `${sub}/sub?host=${fakeHost}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2048")}`;
+		const url = `${sub}/sub?host=${fakeHost}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2048")}`;
 		try {
 			// 可能是base64编码串
 			let encodeStr = await fetchApiWrapper(url, 12000, null, 'v2rayn.xray');
@@ -1800,7 +1798,7 @@ async function processProxyBySub(subapi, fakeUserID, fakeHost, onlyTls = true) {
 			return []; // 如果有错误，直接返回
 		}
 	}
-	let links = await fetchRowApi(subapi).then(async data => (await Promise.all(data.map(m => fetch_sub(m)))).flat().filter(Boolean));
+	const links = await fetchRowApi(subapi).then(async data => (await Promise.all(data.map(m => fetch_sub(m)))).flat().filter(Boolean));
 
 	return linkPageParser(links);
 }
@@ -1810,8 +1808,8 @@ async function processProxyByLink(links) {
 		return [];
 	}
 	// 避免 link 的链接循环调用
-	let apiAvoidDupRef = new Set();
-	let ips = await fetchRowApi(links, 20000, 'v2rayn.xray', apiAvoidDupRef, "http", true);
+	const apiAvoidDupRef = new Set();
+	const ips = await fetchRowApi(links, 20000, 'v2rayn.xray', apiAvoidDupRef, "http", true);
 
 	return linkPageParser(ips);
 }
@@ -1824,7 +1822,7 @@ async function linkPageParser(addrs, parserHttp = false, apiAvoidDupRef = null) 
 	const regExp = /^(\w+):\/\/(?:[^@\s]+@)?([^?#\s\/]+)[^#\s]*(?:#(.*))?$/;
 
 	return (await Promise.allSettled(addrs.map(async addr => {
-		let match = regExp.exec(addr.trim());
+		const match = regExp.exec(addr.trim());
 		if (!match || !match[0]) {
 			return;
 		}
@@ -1838,14 +1836,14 @@ async function linkPageParser(addrs, parserHttp = false, apiAvoidDupRef = null) 
 					if (!parserHttp) {
 						return;
 					}
-					let text = fetchRowApi(link, 12000, 'v2rayn.xray', apiAvoidDupRef, "http", true);
+					const text = fetchRowApi(link, 12000, 'v2rayn.xray', apiAvoidDupRef, "http", true);
 					return linkPageParser(text, parserHttp, apiAvoidDupRef);
 				case atob(ptm):
 					if (!match[2]) throw new Error(`Invalid ${match[1]} address string: ${match[0]}`);
 					({ add: host, port, ps: tag = host } = JSON.parse(decodeURIComponent(escape(atob(match[2])))));
 					break;
 				default:
-					let hostPost = match[2].split(":");
+					const hostPost = match[2].split(":");
 					if (hostPost.length < 2) {
 						throw new Error(`Invalid ${match[1]} address with no port number: ${match[0]}`);
 					}
@@ -1870,7 +1868,7 @@ async function linkPageParser(addrs, parserHttp = false, apiAvoidDupRef = null) 
 
 async function fetchRowApi(configs, apiOutTime = 8000, ua, apiAvoidDupRef = new Set(), apiFlag = "api", base64Decoder = false) {
 	// apiAvoidDupRef 避免 apiFlag 的链接调用循环
-	let inner = async function (configs) {
+	const inner = async function (configs) {
 		if (!Array.isArray(configs)) {
 			if (base64Decoder) {
 				// 将Base64数据解码
@@ -1896,9 +1894,9 @@ async function fetchRowApi(configs, apiOutTime = 8000, ua, apiAvoidDupRef = new 
 				flag_len = 7;
 			}
 			if (needfetch) {
-				let furl = str.slice(flag_len);
+				const furl = str.slice(flag_len);
 				try {
-					let res = await fetchApiWrapper(furl, apiOutTime, apiAvoidDupRef, ua);
+					const res = await fetchApiWrapper(furl, apiOutTime, apiAvoidDupRef, ua);
 					// 回调处理文件有 http 的链接
 					return inner(res);
 				} catch (err) {
@@ -1926,7 +1924,7 @@ async function fetchRowApi(configs, apiOutTime = 8000, ua, apiAvoidDupRef = new 
  * @returns {Promise<string>} fetch text content
  */
 function fetchApiWrapper(furl, outTime = 0, apiAvoidDupRef = null, ua = "Mozilla/5.0 Chrome/131.0.0.0") {
-	let converSplit = furl.split("://");
+	const converSplit = furl.split("://");
 	if (converSplit.length < 2) {
 		furl = "https://" + converSplit[0];
 	}
