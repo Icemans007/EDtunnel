@@ -1,148 +1,62 @@
-// A Cloudflare Worker-based VESS Proxy with WebSocket Transport
+// A Cloudflare Worker-based VLESS Proxy with WebSocket Transport
 import { connect } from 'cloudflare:sockets';
 
 // ======================================
-// Configuration
+// Constants & Default Configuration
 // ======================================
-/**
- * User configuration and settings
- * Generate UUID: [Windows] Press "Win + R", input cmd and run: Powershell -NoExit -Command "[guid]::NewGuid()"
- */
-let userID = '';
+const DEFAULT_PROXY_IPS = ['cdn.xn--b6gac.eu.org:443', 'cdn-all.xn--b6gac.eu.org:443'];
+const at = atob('UUE9PQ==');
+const pt = atob('ZG14bGMzTT0=');
+const ptm = atob('ZG0xbGMzTT0=');
+const ed = atob('UlVSMGRXNXVaV3c9');
 
-/**
- * Array of proxy server addresses with ports
- * Format: ['hostname:port', 'hostname:port']
- */
-const proxyIPs = ['cdn.xn--b6gac.eu.org:443', 'cdn-all.xn--b6gac.eu.org:443'];
+const WS_READY_STATE_OPEN = 1;
+const WS_READY_STATE_CLOSING = 2;
 
-// Randomly select a proxy server from the pool
-let proxyIpPort = proxyIPs[Math.floor(Math.random() * proxyIPs.length)];
-let proxyIP = proxyIpPort?.split(':')[0];
-let proxyPort = proxyIpPort?.split(':')[1] || '443';
-
-// Alternative configurations:
-// Single proxy IP: let proxyIP = 'cdn.xn--b6gac.eu.org';
-// IPv6 example: let proxyIP = "[2a01::5:6810:c55a]"
-
-/**
- * SOCKS5 proxy configuration
- * Format: 'username:password@host:port' or 'host:port'
- */
-let socks5Address = '';
-/**
- * SOCKS5 relay mode
- * When true: All traffic is proxied through SOCKS5
- * When false: Only Cloudflare IPs use SOCKS5
- */
-let socks5Relay = false;
-
-let parsedSocks5Address = {};
-let enableSocks = false;
-
-// 是否禁止非TLS
-let onlyTls = false;
-
-/**
- * Main handler for the Cloudflare Worker. Processes incoming requests and routes them appropriately.
- * @param {import("@cloudflare/workers-types").Request} request - The incoming request object
- * @param {Object} env - Environment variables containing configuration
- * @param {string} env.UUID - User ID for authentication
- * @param {string} env.PROXYIP - Proxy server IP address
- * @param {string} env.SOCKS5 - SOCKS5 proxy configuration
- * @param {string} env.SOCKS5_RELAY - SOCKS5 relay mode flag
- * @returns {Promise<Response>} Response object
- */
+// ======================================
+// Main Worker Handler
+// ======================================
 export default {
-	/**
-	 * @param {import("@cloudflare/workers-types").Request} request
-	 * @param {Object} env
-	 * @param {import("@cloudflare/workers-types").ExecutionContext} _ctx
-	 * @returns {Promise<Response>}
-	 */
+
 	async fetch(request, env, _ctx) {
 		try {
 			const url = new URL(request.url);
 			const host = request.headers.get('Host');
 			const userAgent = request.headers.get('User-Agent')?.toLowerCase() || '';
-			// @ts-ignore
-			const { UUID, PROXYIP, SOCKS5, SOCKS5_RELAY } = env;
 
-			userID = UUID?.trim().replace(/[\s,]+/g, ',') || userID;
-			if (userID.split(',').some(uuid => !isValidUUID(uuid))) {
-				throw new Error('uuid is not valid');
+			// 1. Parse and validate environment configurations for this request
+			const config = parseEnvironment(env, url);
+
+			if (config.userIDs.some(uuid => !isValidUUID(uuid))) {
+				throw new Error('UUID is not valid');
 			}
 
-			socks5Address = SOCKS5 || socks5Address;
-			socks5Relay = SOCKS5_RELAY || socks5Relay;
-
-			[proxyIP, proxyPort] = processProxyip(url, PROXYIP);
-
-			if (socks5Address) {
-				try {
-					// Split SOCKS5 into an array of addresses
-					const socks5Addresses = socks5Address.trim().split(/[,\s]+/);
-					// Randomly select one SOCKS5 address
-					const selectedSocks5 = socks5Addresses[Math.floor(Math.random() * socks5Addresses.length)];
-					parsedSocks5Address = socks5AddressParser(selectedSocks5);
-					enableSocks = true;
-				} catch (err) {
-					console.log(err.toString());
-					enableSocks = false;
-				}
+			// 2. Handle WebSocket Upgrades (Proxy Traffic)
+			if (request.headers.get('Upgrade') === 'websocket') {
+				return await ProtocolOverWSHandler(request, config);
 			}
 
-			if (request.headers.get('Upgrade') !== 'websocket') {
-
-				let pathname = url.pathname.toLowerCase().trim();
-				if (pathname.length > 1 && pathname.slice(-1) === '/') {
-					pathname = pathname.slice(0, -1);
-				}
-				const userID_Path = userID.split(',').find(uuid => pathname.includes(uuid)) || "";
-
-				switch (true) {
-					case pathname === '/':
-						// if (env.URL_FORWARD) return handleForward(env, request);
-						// 伪装页面
-						return handleDefaultPath(url, request);
-					case pathname === '/cfrequest':
-						return new Response(JSON.stringify(request.cf, null, 4), {
-							status: 200,
-							headers: { "Content-Type": "application/json;charset=utf-8" },
-						});
-					case pathname === '/convertersubrequest':
-					case pathname === `/${userID_Path}`:
-						const args = {
-							userID: userID_Path,
-							host,
-							url,
-							userAgent,
-							ENV: env,
-						};
-						return GenSub(args);
-					case pathname === `/bestip/${userID_Path}`:
-						return fetch(`https://bestip.06151953.xyz/auto?host=${host}&uuid=${userID_Path}&path=/`, { headers: request.headers });
-					default:
-						// if (env.URL_FORWARD) return handleForward(env, request);
-						return new Response(`<html>
-<head><title>${host} - Cloud Drive</title></head>
-<body>
-<center><h1>404 Not Found</h1></center>
-<hr><center>nginx</center>
-</body>
-</html>
-<!-- a padding to disable MSIE and Chrome friendly error page -->
-<!-- a padding to disable MSIE and Chrome friendly error page -->
-<!-- a padding to disable MSIE and Chrome friendly error page -->
-<!-- a padding to disable MSIE and Chrome friendly error page -->
-<!-- a padding to disable MSIE and Chrome friendly error page -->`, {
-							status: 404,
-							headers: { "Content-Type": "text/html; charset=utf-8" }
-						});
-				}
-
-			} else {
-				return await ProtocolOverWSHandler(request);
+			// 3. Handle Standard HTTP Requests (Routing)
+			let pathname = url.pathname.replace(/\/+$/, '') || '/';
+			const matchedUUID = config.userIDs.find(uuid => pathname.includes(uuid));
+			switch (true) {
+				case pathname === '/':
+					if (env.URL_FORWARD) return handleForward(env, request);
+					// 伪装页面
+					return handleDefaultPath(url, request);
+				case !!matchedUUID:
+					const args = {
+						userID: matchedUUID,
+						host,
+						url,
+						userAgent,
+						env,
+						config
+					};
+					return handleSubscriptionRequest(args);
+				default:
+					if (env.URL_FORWARD) return handleForward(env, request);
+					return new Response('Not Found', { status: 404 });
 			}
 		} catch (err) {
 			return new Response(err.toString(), {
@@ -150,37 +64,59 @@ export default {
 				headers: { "Content-Type": "text/plain; charset=utf-8" }
 			});
 		}
-	},
+	}
 };
 
 /**
- * 处理 ProxyIP
- *
- * @param {*} url
- * @param {*} PROXYIP
+ * Parses environment variables safely per-request to avoid cross-request state pollution.
  */
-function processProxyip(url, PROXYIP) {
-	let iproxyIP, iproxyPort;
-	const requestProxyip = url.searchParams.get("proxyip") || url.searchParams.get("pyip");
+function parseEnvironment(env, url) {
+	const userIDs = (env.UUID || '').trim().replace(/[\s,]+/g, ',').split(',').filter(Boolean);
 
-	if (requestProxyip || PROXYIP) {
-		// Split PROXYIP into an array of proxy addresses
-		const proxyAddresses = (requestProxyip || PROXYIP).trim().split(/[,\s]+/).filter(addr => addr.charAt(0) !== "#");
-		// Randomly select one proxy address
+	// Proxy IP Selection
+	let proxyIP, proxyPort;
+	const requestProxyip = url.searchParams.get("proxyip") || url.searchParams.get("pyip");
+	const proxySource = requestProxyip || env.PROXYIP;
+
+	if (proxySource) {
+		const proxyAddresses = proxySource.trim().split(/[,\s]+/).filter(addr => !addr.startsWith("#"));
 		const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
 		if (!selectedProxy.includes('[')) {
-			[iproxyIP, iproxyPort = '443'] = selectedProxy.split(':');
+			[proxyIP, proxyPort = '443'] = selectedProxy.split(':');
+		} else {
+			[, proxyIP, proxyPort = '443'] = selectedProxy.match(/(\[[a-f0-9:]+\])(?::(\d+))?/i);
 		}
-		else {
-			[, iproxyIP, iproxyPort = '443'] = selectedProxy.match(/(\[[a-f0-9:]+\])(?::(\d+))?/i);
-		}
-	}
-	else {
-		iproxyIP = proxyIP;
-		iproxyPort = proxyPort;
+	} else {
+		const randomDefault = DEFAULT_PROXY_IPS[Math.floor(Math.random() * DEFAULT_PROXY_IPS.length)];
+		[proxyIP, proxyPort] = randomDefault.split(':');
 	}
 
-	return [iproxyIP, iproxyPort];
+	// SOCKS5 Configuration
+	let enableSocks = false;
+	let parsedSocks5Address = null;
+	const socks5Address = env.SOCKS5 || '';
+	const socks5Relay = env.SOCKS5_RELAY || false;
+
+	if (socks5Address) {
+		try {
+			const socks5Addresses = socks5Address.trim().split(/[,\s]+/);
+			const selectedSocks5 = socks5Addresses[Math.floor(Math.random() * socks5Addresses.length)];
+			parsedSocks5Address = socks5AddressParser(selectedSocks5);
+			enableSocks = true;
+		} catch (err) {
+			console.log("SOCKS5 Parse Error:", err.toString());
+		}
+	}
+
+	return {
+		userIDs,
+		proxyIP,
+		proxyPort,
+		enableSocks,
+		parsedSocks5Address,
+		socks5Relay,
+		onlyTls: env.ONLYTLS ?? true
+	};
 }
 
 /**
@@ -190,21 +126,7 @@ function processProxyip(url, PROXYIP) {
  */
 function handleForward(env, request) {
 	const url = new URL(request.url);
-	const targetUrl = new URL(env.URL_FORWARD + url.pathname + url.search);
-	// 复制原始头，并移除/修改敏感头
-	const headers = new Headers(
-		[...request.headers].filter(([key]) => !key.toLowerCase().startsWith('cf-'))
-	);
-
-	// 强制设置正确的 Host 头
-	headers.set('Host', targetUrl.hostname);
-	// 转发请求
-	return fetch(targetUrl, {
-		method: request.method,
-		headers: headers,
-		body: request.body,
-		redirect: 'follow'
-	});
+	return fetch(new Request(env.URL_FORWARD + url.search, request));
 }
 
 /**
@@ -467,15 +389,11 @@ function handleDefaultPath(url, request) {
 	});
 }
 
-/**
- * Handles protocol over WebSocket requests by creating a WebSocket pair, accepting the WebSocket connection, and processing the protocol header.
- * @param {import("@cloudflare/workers-types").Request} request - The incoming request object
- * @returns {Promise<Response>} WebSocket response
- */
-async function ProtocolOverWSHandler(request) {
+// ======================================
+// Core Proxy Logic
+// ======================================
+async function ProtocolOverWSHandler(request, config) {
 
-	/** @type {import("@cloudflare/workers-types").WebSocket[]} */
-	// @ts-ignore
 	const webSocketPair = new WebSocketPair();
 	const [client, webSocket] = Object.values(webSocketPair);
 
@@ -519,7 +437,7 @@ async function ProtocolOverWSHandler(request) {
 				rawDataIndex,
 				ProtocolVersion = new Uint8Array([0, 0]),
 				isUDP,
-			} = ProcessProtocolHeader(chunk, userID);
+			} = ProcessProtocolHeader(chunk, config.userIDs);
 			address = addressRemote;
 			portWithRandomLog = `${portRemote}--${Math.random()} ${isUDP ? 'udp ' : 'tcp '
 				} `;
@@ -544,7 +462,7 @@ async function ProtocolOverWSHandler(request) {
 				return handleDNSQuery(rawClientData, webSocket, ProtocolResponseHeader, log);
 			}
 			// @ts-ignore
-			HandleTCPOutBound(remoteSocketWapper, addressType, addressRemote, portRemote, rawClientData, webSocket, ProtocolResponseHeader, log);
+			HandleTCPOutBound(remoteSocketWapper, addressType, addressRemote, portRemote, rawClientData, webSocket, ProtocolResponseHeader, config, log);
 		},
 		close() {
 			log(`readableWebSocketStream is close`);
@@ -573,20 +491,20 @@ async function ProtocolOverWSHandler(request) {
  * @param {Uint8Array} rawClientData - Raw data from client
  * @param {WebSocket} webSocket - WebSocket connection
  * @param {Uint8Array} ProtocolResponseHeader - Protocol response header
+ * @param {Object} config - config
  * @param {Function} log - Logging function
  */
-async function HandleTCPOutBound(remoteSocket, addressType, addressRemote, portRemote, rawClientData, webSocket, ProtocolResponseHeader, log) {
+async function HandleTCPOutBound(remoteSocket, addressType, addressRemote, portRemote, rawClientData, webSocket, ProtocolResponseHeader, config, log) {
 	async function connectAndWrite(address, port, socks = false) {
 		/** @type {import("@cloudflare/workers-types").Socket} */
 		let tcpSocket;
-		if (socks5Relay) {
-			tcpSocket = await socks5Connect(addressType, address, port, log)
+		if (config.socks5Relay || socks) {
+			tcpSocket = await socks5Connect(addressType, address, port, config.parsedSocks5Address, log)
 		} else {
-			tcpSocket = socks ? await socks5Connect(addressType, address, port, log)
-				: connect({
-					hostname: address,
-					port: port,
-				});
+			tcpSocket = connect({
+				hostname: address,
+				port: port,
+			});
 		}
 		// @ts-ignore
 		remoteSocket.value = tcpSocket;
@@ -599,10 +517,10 @@ async function HandleTCPOutBound(remoteSocket, addressType, addressRemote, portR
 
 	// if the cf connect tcp socket have no incoming data, we retry to redirect ip
 	async function retry() {
-		if (enableSocks) {
+		if (config.enableSocks) {
 			tcpSocket = await connectAndWrite(addressRemote, portRemote, true);
 		} else {
-			tcpSocket = await connectAndWrite(proxyIP || addressRemote, proxyPort || portRemote, false);
+			tcpSocket = await connectAndWrite(config.proxyIP || addressRemote, config.proxyPort || portRemote, false);
 		}
 		// no matter retry success or not, close websocket
 		tcpSocket.closed.catch(error => {
@@ -670,14 +588,7 @@ function MakeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
 	return stream;
 }
 
-/**
- * Processes VESS protocol header.
- * Extracts and validates protocol information from buffer.
- * @param {ArrayBuffer} protocolBuffer - Buffer containing protocol header
- * @param {string} userID - User ID for validation
- * @returns {Object} Processed header information
- */
-function ProcessProtocolHeader(protocolBuffer, userID) {
+function ProcessProtocolHeader(protocolBuffer, userIDs) {
 	if (protocolBuffer.byteLength < 24) {
 		return { hasError: true, message: 'invalid data' };
 	}
@@ -685,16 +596,10 @@ function ProcessProtocolHeader(protocolBuffer, userID) {
 	const dataView = new DataView(protocolBuffer);
 	const version = dataView.getUint8(0);
 	const slicedBufferString = stringify(new Uint8Array(protocolBuffer.slice(1, 17)));
-
-	const uuids = userID.includes(',') ? userID.split(",") : [userID];
-	const isValidUser = (uuids.length === 1 && slicedBufferString === uuids[0].trim()) ||
-		uuids.some(uuid => slicedBufferString === uuid.trim());
-
 	console.log(`userID: ${slicedBufferString}`);
 
-	if (!isValidUser) {
-		return { hasError: true, message: 'invalid user' };
-	}
+	const isValidUser = userIDs.some(uuid => slicedBufferString === uuid.trim());
+	if (!isValidUser) return { hasError: true, message: 'invalid user' };
 
 	const optLength = dataView.getUint8(17);
 	const command = dataView.getUint8(18 + optLength);
@@ -828,9 +733,6 @@ function isValidUUID(uuid) {
 	return uuidRegex.test(uuid);
 }
 
-const WS_READY_STATE_OPEN = 1;
-const WS_READY_STATE_CLOSING = 2;
-
 /**
  * Safely closes WebSocket connection.
  * Prevents exceptions during WebSocket closure.
@@ -949,10 +851,11 @@ async function handleDNSQuery(udpChunk, webSocket, protocolResponseHeader, log) 
  * @param {number} addressType - Type of address
  * @param {string} addressRemote - Remote address
  * @param {number} portRemote - Remote port
+ * @param {Object} parsedSocks5Address - socks5Address
  * @param {Function} log - Logging function
  * @returns {Promise<Socket>} Connected socket
  */
-async function socks5Connect(addressType, addressRemote, portRemote, log) {
+async function socks5Connect(addressType, addressRemote, portRemote, parsedSocks5Address, log) {
 	const { username, password, hostname, port } = parsedSocks5Address;
 	// Connect to the SOCKS server
 	const socket = connect({
@@ -1117,18 +1020,7 @@ function socks5AddressParser(address) {
 	}
 }
 
-const at = atob('UUE9PQ==');
-const pt = atob('ZG14bGMzTT0=');
-const ptm = atob('ZG0xbGMzTT0=');
-const ed = atob('UlVSMGRXNXVaV3c9');
-
-/**
- * Generates configuration for VESS client.
- * @param {string} userID - userID
- * @param {string} hostName - Host name for configuration
- * @returns {string} Configuration HTML
- */
-function getConfig(userID, hostName) {
+function generateSubscriptionWebpage(userID, hostName, config) {
 	const randomPath = () => '/' + Math.random().toString(36).substring(2, 15) + '?ed=2048';
 	const commonUrlPartHttp = `?security=none&fp=chrome&type=ws&host=${hostName}&path=${encodeURIComponent(randomPath())}#`;
 	const commonUrlPartHttps = `?security=tls&sni=${hostName}&fp=chrome&type=ws&host=${hostName}&path=${encodeURIComponent(randomPath())}#`;
@@ -1312,7 +1204,7 @@ function getConfig(userID, hostName) {
       host: ${hostName}`;
 		}));
 
-		if (!onlyTls) {
+		if (!config.onlyTls) {
 			vessPart = vessPart.concat([80].map(port => {
 				const urlPart = encodeURIComponent(`${hostName}-HTTP-${port}`);
 				return atob(pt) + '://' + userID + atob(at) + hostName + ':' + port + commonUrlPartHttp + urlPart;
@@ -1348,7 +1240,7 @@ function getConfig(userID, hostName) {
       <div class="container config-item">
 	  	<h2>代理配置</h2>
         <h4>UUID: ${userID}</h2>
-        <h4>PROXYIP: ${proxyIP}:${proxyPort}</h2>
+        <h4>PROXYIP: ${config.proxyIP}:${config.proxyPort}</h2>
         <h3>${atob(pt)} 配置</h3>
 		<div class="code-container">
 		  <pre><code>${codehtml(vessPart)}</code></pre>
@@ -1388,227 +1280,96 @@ function getConfig(userID, hostName) {
  * Generates subscription content.
  * @returns {Promise<Response>} Subscription content
  */
-async function GenSub({ userID, host, userAgent, url, ENV }) {
+async function handleSubscriptionRequest({ userID, host, userAgent, url, env, config }) {
 
-	let { ADD, SUB, CSV, LINKS, DLSstr, SUBCONVER, ACL4SSR_CONFIG, ONLYTLS } = ENV;
+	const hasProxyParams = url.searchParams.has("cfproxylist") || url.searchParams.has("cfproxycsv") || url.searchParams.has("proxysub");
 
-	// 订阅链接转换 crash/sing-box 的服务器后端地址
-	let subconverter = SUBCONVER;
-	// 订阅转换配置文件
-	const subConverterMode = ACL4SSR_CONFIG || "https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/refs/heads/master/Clash/config/ACL4SSR_Online.ini";
+	if (url.searchParams.has("notTls")) config.onlyTls = false;
+	if (host.includes('pages.dev')) config.onlyTls = true;
 
-	let target = "";
-	if (url.searchParams.has('sub')) {
-		target = "sub";
-	}
-	else if (url.searchParams.has('clash') || userAgent.includes('clash')) {
-		target = "clash";
-	}
-	else if (url.searchParams.has('singbox') || url.searchParams.has('sing-box')
-		|| userAgent.includes('singbox') || userAgent.includes('sing-box')) {
-		target = "singbox";
-	}
-
-	// 是否是第三方后端订阅转换服务请求 https://${host}/convertersubrequest
-	const isSubReq = url.pathname.toLowerCase().startsWith("/convertersubrequest");
-	let hasProxyParams = false;
-	if (url.searchParams.has("cfproxylist") || url.searchParams.has("cfproxycsv") || url.searchParams.has("proxysub")) {
-		hasProxyParams = true;
-	}
-
-	onlyTls = ONLYTLS ?? true;
-	if (url.searchParams.has("notTls")) {
-		onlyTls = false;
-	}
-	if (host.includes('pages.dev')) {
-		onlyTls = true;
-	}
-
-	if (!target && !hasProxyParams && !isSubReq && userAgent.toLowerCase().includes('mozilla')) {
-		return new Response(getConfig(userID, host), {
+	if (!hasProxyParams && userAgent.toLowerCase().includes('mozilla')) {
+		return new Response(generateSubscriptionWebpage(userID, host, config), {
 			status: 200,
 			headers: { "Content-Type": "text/html; charset=utf-8" },
 		});
 	}
 
-	let fakeUserID = generateRandomUUID();
-	let fakeHost = generateRandomStr(8) + "." + generateRandomStr(6) + [".net", ".com", ".org", ".edu", ".cn", ".jp", ".xyz", ".us"].at(Math.random() * 8 | 0);
+	// Generate and merge proxy lists
+	const addresses = [];
+	const extracted = await fetchExternalProxies(env, url, userID, host, config);
+	addresses.push(...extracted);
 
-	if (!isSubReq && (target === "clash" || target === "singbox")) {
-		if (url.searchParams.has("subconverter")) {
-			subconverter = url.searchParams.get("subconverter")?.trim();
-		}
+	return formatSubscriptionResponse(addresses, userID, host, config);
+}
 
-		if (!subconverter) {
-			return new Response(`服务没有绑定后端订阅转换服务，请使用"&subconverter="传递订阅转换服务地址`, {
-				status: 412,
-				headers: {
-					'Content-Type': 'text/html; charset=utf-8',
-				}
-			});
-		}
+async function fetchExternalProxies(env, url, userID, host, config) {
+	const results = [];
+	const dlsStr = url.searchParams.get("DLSstr") || "5";
+	const hasProxyParams = url.searchParams.has("cfproxylist") || url.searchParams.has("cfproxycsv") || url.searchParams.has("proxysub");
 
-		// 连接协议
-		const subconverSplit = subconverter.split("://");
-		if (subconverSplit.length < 2) {
-			// 有时候是本地服务，所以默认是非TLS
-			subconverter = "http://" + subconverSplit[0];
-		}
+	const [textListStr, csvListStr, subProviderStr] = [
+		hasProxyParams ? url.searchParams.get("cfproxylist") : env.ADD,
+		hasProxyParams ? url.searchParams.get("cfproxycsv") : env.CSV,
+		hasProxyParams ? url.searchParams.get("proxysub") : env.SUB
+	];
 
-		// suburl token 是映射前后 fakeUserID fakeHost
-		let suburl = `https://${host}/convertersubrequest?`;
-		if (url.search.length > 0) {
-			suburl = `https://${host}/convertersubrequest${url.search}&`;
-		}
-		suburl += `token=${btoa(fakeUserID + "@" + fakeHost)}`;
-		const ffetch = `${subconverter}/sub?target=${target}&url=${encodeURIComponent(suburl)}&insert=false\
-&config=${encodeURIComponent(subConverterMode)}&udp=true&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
-
-		try {
-			const respText = await fetchApiWrapper(ffetch, 16000, null, userAgent);
-			// 还原假信息为真
-			return new Response(respText.replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host), {
-				status: 200,
-				headers: { "Content-Type": "text/plain; charset=utf-8" },
-			});
-		} catch (err) {
-			console.error('请求subconverter地址时出错: ' + ffetch, err);
-			return new Response(`后端订阅转换服务错误`, {
-				status: 500,
-				headers: {
-					'Content-Type': 'text/plain; charset=utf-8',
-				}
-			});
-		}
+	if (textListStr) {
+		const urls = textListStr.trim().split(/[,\s]+/).map(l => {
+			return (l.startsWith("https://") || l.startsWith("http://")) ? l : "https://" + l;
+		}).join(',');
+		results.push(...await parseTextProxyList(urls));
+	}
+	if (csvListStr) {
+		results.push(...await parseCsvProxyList(csvListStr, config.onlyTls, dlsStr));
+	}
+	if (subProviderStr) {
+		results.push(...await parseSubProviderLinks(subProviderStr, userID, host));
 	}
 
-	if (isSubReq) {
-		// 校验第三方后端订阅转换服务请求合法
-		if (!url.searchParams.has('token') || !isBase64(url.searchParams.get('token'))) {
-			return new Response(new Error("Illegal Requests").message, {
-				status: 403,
-				headers: {
-					'Content-Type': 'text/html;charset=utf-8',
-				}
-			});
-		}
+	return results;
+}
 
-		const token = atob(url.searchParams.get('token')).split('@');
-		if (token.length !== 2) {
-			return new Response(new Error("Illegal Requests").message, {
-				status: 403,
-				headers: {
-					'Content-Type': 'text/html;charset=utf-8',
-				}
-			});
-		}
+function formatSubscriptionResponse(addresses, userID, host, config) {
+	const uniqueTags = new Map();
+	const uniqueAddrs = new Map();
+	const speed_reg = /\d+\.?\d*(?= ?[MK]B\/s)/i;
 
-		[fakeUserID, fakeHost] = token;
+	for (const [scheme, addr, port, rawTag, fullLink] of addresses) {
+		const key = `${scheme}:${addr}:${port}`;
+		const existing = uniqueAddrs.get(key);
+		const pSpeed = speed_reg.exec(rawTag);
+		const eSpeed = existing && speed_reg.exec(existing[0]);
+		// 如果新链接Tag中有测速数据的Tag比没有的好，数据大的更好
+		if (!(!existing || !eSpeed && pSpeed || eSpeed && pSpeed && pSpeed[0] > eSpeed[0])) continue;
+
+		const tlsQuery = config.onlyTls ? "&security=tls" : "";
+		let link = fullLink || `${scheme}://${userID}@${addr}:${port}?type=ws${tlsQuery}&host=${host}&sni=${host}&path=${encodeURIComponent("/?ed=2048")}#${encodeURIComponent(rawTag)}`;
+
+		// Handle duplicate tags
+		let count = uniqueTags.get(rawTag) || 0;
+		uniqueTags.set(rawTag, count + 1);
+		if (count > 0) link += `%20${count + 1}`;
+
+		uniqueAddrs.set(key, [rawTag, link]);
 	}
 
-	if (url.searchParams.get("DLSstr")) {
-		DLSstr = url.searchParams.get("DLSstr");
-	}
+	const finalLinksStr = Array.from(uniqueAddrs.values()).map(m => m[1]).join('\n');
 
-	let addresses = [];
-
-	if (hasProxyParams) {
-		// CF IP列表
-		ADD = "";
-		// CSV CF代理表格
-		CSV = "";
-		// 优选生成器
-		SUB = "";
-		// 各种协议代理地址
-		LINKS = "";
-
-		if (url.searchParams.get("cfproxylist")) {
-			ADD = url.searchParams.get("cfproxylist").trim().split(/[,\s]+/).map(list => "api://" + list).join(',');
-		}
-		if (url.searchParams.get("cfproxycsv")) {
-			CSV = url.searchParams.get("cfproxycsv");
-		}
-		if (url.searchParams.get("proxysub")) {
-			SUB = url.searchParams.get("proxysub");
-		}
-	}
-
-	if (ADD) {
-		const res = await processCfRevRowByText(ADD, onlyTls);
-		if (res.length > 0) {
-			addresses = addresses.concat(res);
-		}
-	}
-	if (CSV) {
-		const res = await processCfRevByCsv(CSV, onlyTls, DLSstr);
-		if (res.length > 0) {
-			addresses = addresses.concat(res);
-		}
-	}
-	if (SUB) {
-		const res = await processProxyBySub(SUB, fakeUserID, fakeHost, onlyTls);
-		if (res.length > 0) {
-			addresses = addresses.concat(res);
-		}
-	}
-
-	if (LINKS) {
-		const res = await processProxyByLink(LINKS);
-		if (res.length > 0) {
-			addresses = addresses.concat(res);
-		}
-	}
-
-	// 这里query proxyip 会多一个api请求获取proxyip过程
-	// const [proxyIP, proxyPort] = await processProxyip(url, PROXYIP);
-	// &path=${encodeURIComponent("/?ed=2048&proxyip=" + proxyIP + ":" + proxyPort)}
-
-	// 根据 tagname 去重， tagname相同+1递增
-	const uniqueTags = new Map(Array.from(new Set(addresses.map(m => m[3]))).map(a => [a, 0]));
-
-	const linkes = addresses.reduce((accMap, url_arr) => {
-		// url_arr[0] ==> protocol
-		// url_arr[1] ==> address
-		// url_arr[2] ==> port
-		// url_arr[3] ==> tagname
-		// url_arr[4] ==> 完整链接,可能为undefined, 当不为undefined时，要按需（!isSubReq）将fakeUserID、fakeHost 还原
-		// 利用 uniqueAddr【protocol:address:port】去重
-		const uniqueAddr = url_arr[0] + ":" + url_arr[1] + ":" + url_arr[2];
-		const old = accMap.get(uniqueAddr);
-		if (!(old && [...old[0]].length >= [...url_arr[3]].length)) {
-			const tmpUserID = isSubReq ? fakeUserID : userID;
-			const tmpHost = isSubReq ? fakeHost : host;
-			// 没有 url_arr[4] 是 v l ess
-			let link = url_arr[4] || `${atob(pt)}://${tmpUserID}${atob(at)}${url_arr[1]}:${url_arr[2]}?\
-type=ws${onlyTls ? "&security=tls" : ""}&host=${tmpHost}&sni=${tmpHost}&path=${encodeURIComponent("/?ed=2048")}#${encodeURIComponent(url_arr[3])}`;
-
-			if (!isSubReq && url_arr[4]?.includes(fakeUserID) && url_arr[4]?.includes(fakeHost)) {
-				link = url_arr[4].replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host);
-			}
-
-			// 相同 tagname 递增
-			let num = uniqueTags.get(url_arr[3]);
-			uniqueTags.set(url_arr[3], ++num);
-			if (num > 1) {
-				link += `%20${num}`;
-			}
-			accMap.set(uniqueAddr, [url_arr[3], link]);
-		}
-		return accMap;
-	}, new Map()).values().toArray().map(m => m[1]).join('\n');
-
-	return new Response(btoa(unescape(encodeURIComponent(linkes))), {
+	return new Response(base64Encode(finalLinksStr), {
 		status: 200,
-		headers: { "Content-Type": "text/plain; charset=utf-8" },
+		headers: { "Content-Type": "text/plain; charset=utf-8" }
 	});
 }
 
 /*
+获取下面格式Row
 abc.com:端口#节点名
 123.123.123.123:端口#节点名
 [abc:1234::1]:端口#节点名
+
+https://exp.net/getCfIp		#还有是带链接地址的需要fetch
 */
-async function processCfRevRowByText(add, onlyTls) {
+async function parseTextProxyList(add) {
 	if (!add || (add = add.trim()).length == 0) {
 		return [];
 	}
@@ -1622,10 +1383,6 @@ async function processCfRevRowByText(add, onlyTls) {
 		}
 		let [, host, port, tag = host] = match;
 		if (!port) {
-			// 没有设置端口的，根据 CF 默认端口返回
-			// if (!onlyTls) {
-			// 	port = "80";
-			// }
 			port = "443";
 		}
 
@@ -1634,7 +1391,7 @@ async function processCfRevRowByText(add, onlyTls) {
 }
 
 // 通过csv文件获取cf代理IP
-async function processCfRevByCsv(csv, onlyTls, DLSstr = 5) {
+async function parseCsvProxyList(csv, onlyTls, DLSstr = 5) {
 	if (!csv || (csv = csv.trim()).length == 0) {
 		return [];
 	}
@@ -1768,10 +1525,15 @@ async function processCfRevByCsv(csv, onlyTls, DLSstr = 5) {
 }
 
 // 通过第三方订阅器获取代理地址
-async function processProxyBySub(subapi, fakeUserID, fakeHost, onlyTls = true) {
+async function parseSubProviderLinks(subapi, userID, host) {
 	if (!subapi || (subapi = subapi.trim()).length == 0) {
 		return [];
 	}
+	const subapis = subapi.trim().split(/[\n,]+/);
+
+	// 向第三方订阅生成器请求前，需要将自身的CF节点的UUID和节点地址使用假数据掩盖
+	const fakeUserID = crypto.randomUUID();
+	const fakeHost = `${generateRandomStr(8)}.${generateRandomStr(6)}.${[".net", ".com", ".org", ".edu", ".cn", ".jp", ".xyz", ".us"].at(Math.random() * 8 | 0)}`;
 
 	const generNum = new Set();
 	const fetch_sub = async function (sub) {
@@ -1791,30 +1553,24 @@ async function processProxyBySub(subapi, fakeUserID, fakeHost, onlyTls = true) {
 			// 可能是base64编码串
 			let encodeStr = await fetchApiWrapper(url, 12000, null, 'v2rayn.xray');
 			// 将Base64数据解码
-			encodeStr = (isBase64(encodeStr) ? decodeURIComponent(escape(atob(encodeStr))) : encodeStr);
+			encodeStr = (isBase64(encodeStr) ? base64Decode(encodeStr) : encodeStr);
+			// 将假数据还原
+			encodeStr = encodeStr.replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host)
 			return encodeStr.split('\n');
 		} catch (err) {
 			console.error('解析ProxyGener地址时出错: ' + url, err);
 			return []; // 如果有错误，直接返回
 		}
 	}
-	const links = await fetchRowApi(subapi).then(async data => (await Promise.all(data.map(m => fetch_sub(m)))).flat().filter(Boolean));
+	const links = (await Promise.all(subapis.map(async data => {
+		if (data.charAt(0) === '#') return;
+		return fetch_sub(data);
+	}))).filter(Boolean);
 
 	return linkPageParser(links);
 }
 
-async function processProxyByLink(links) {
-	if (!links || (links = links.trim()).length == 0) {
-		return [];
-	}
-	// 避免 link 的链接循环调用
-	const apiAvoidDupRef = new Set();
-	const ips = await fetchRowApi(links, 20000, 'v2rayn.xray', apiAvoidDupRef, "http", true);
-
-	return linkPageParser(ips);
-}
-
-async function linkPageParser(addrs, parserHttp = false, apiAvoidDupRef = null) {
+async function linkPageParser(addrs) {
 	if (!addrs || addrs.length == 0) {
 		return [];
 	}
@@ -1830,17 +1586,13 @@ async function linkPageParser(addrs, parserHttp = false, apiAvoidDupRef = null) 
 		let host, port, tag, link = match[0];
 		try {
 			switch (match[1]) {
-				case atob("c3Ny"): return;
+				case atob("c3Ny"):
 				case "http":
 				case "https":
-					if (!parserHttp) {
-						return;
-					}
-					const text = fetchRowApi(link, 12000, 'v2rayn.xray', apiAvoidDupRef, "http", true);
-					return linkPageParser(text, parserHttp, apiAvoidDupRef);
+					return;
 				case atob(ptm):
 					if (!match[2]) throw new Error(`Invalid ${match[1]} address string: ${match[0]}`);
-					({ add: host, port, ps: tag = host } = JSON.parse(decodeURIComponent(escape(atob(match[2])))));
+					({ add: host, port, ps: tag = host } = JSON.parse(base64Decode(match[2])));
 					break;
 				default:
 					const hostPost = match[2].split(":");
@@ -1866,37 +1618,24 @@ async function linkPageParser(addrs, parserHttp = false, apiAvoidDupRef = null) 
 	}))).flatMap(m => m.status === "fulfilled" ? m.value : undefined).filter(Boolean);
 }
 
-async function fetchRowApi(configs, apiOutTime = 8000, ua, apiAvoidDupRef = new Set(), apiFlag = "api", base64Decoder = false) {
-	// apiAvoidDupRef 避免 apiFlag 的链接调用循环
+async function fetchRowApi(configs, apiOutTime = 8000) {
+	// apiAvoidDupRef 避免是链接循环调用
+	const apiAvoidDupRef = new Set();
 	const inner = async function (configs) {
 		if (!Array.isArray(configs)) {
-			if (base64Decoder) {
-				// 将Base64数据解码
-				configs = isBase64(configs) ? decodeURIComponent(escape(atob(configs))) : configs;
-			}
+			// 将Base64数据解码
+			configs = isBase64(configs) ? base64Decode(configs) : configs;
 			configs = configs.trim().split(/[\n,]+/);
 		}
+
 		return (await Promise.allSettled(configs.map(async str => {
 			// 前面是# 号的是忽略的配置
 			str = str.trim();
 			if (str.charAt(0) === '#') return;
-			let needfetch = false, flag_len = 0;
-			if (apiFlag == "api" && str.startsWith("api://")) {
-				needfetch = true;
-				flag_len = 6;
-			}
-			else if (apiFlag == "http" && str.startsWith("https://")) {
-				needfetch = true;
-				flag_len = 8;
-			}
-			else if (apiFlag == "http" && str.startsWith("http://")) {
-				needfetch = true;
-				flag_len = 7;
-			}
-			if (needfetch) {
-				const furl = str.slice(flag_len);
+
+			if (str.startsWith("https://") || str.startsWith("http://")) {
 				try {
-					const res = await fetchApiWrapper(furl, apiOutTime, apiAvoidDupRef, ua);
+					const res = await fetchApiWrapper(str, apiOutTime, apiAvoidDupRef);
 					// 回调处理文件有 http 的链接
 					return inner(res);
 				} catch (err) {
@@ -1960,27 +1699,25 @@ function fetchApiWrapper(furl, outTime = 0, apiAvoidDupRef = null, ua = "Mozilla
 	return prom;
 }
 
-function generateRandomUUID() {
-	return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
-		const r = Math.random() * 16 | 0;
-		const v = c == "x" ? r : r & 3 | 8;
-		return v.toString(16);
-	});
-}
-
 function generateRandomStr(len) {
 	return Math.random().toString(36).substring(2, len);
 }
 
-const isBase64 = (() => {
-	const regex = /^[A-Za-z0-9+/-_]+={0,2}$/;
-	return (str) => {
-		if (!str || str.length % 4 !== 0) return false;
-		if (!regex.test(str)) return false;
-		try {
-			return btoa(atob(str)) === str;
-		} catch {
-			return false;
-		}
+function base64Encode(str) {
+	return btoa(String.fromCharCode(...new TextEncoder().encode(str)));
+}
+
+function base64Decode(str) {
+	return new TextDecoder().decode(Uint8Array.from(atob(str), c => c.charCodeAt(0)));
+}
+
+function isBase64(str) {
+	if (typeof str !== 'string' || !str) return false;
+	if (!/^[A-Za-z0-9+/]+={0,2}$/.test(str)) return false;
+	try {
+		atob(str); // 尝试解码
+		return true;
+	} catch {
+		return false;
 	}
-})();
+}
