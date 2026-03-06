@@ -93,6 +93,11 @@ jobs:
           WENV: 'prod'
           COMMIT_SHA: ${{ github.sha }}
 
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "24"
+
         # npm (and node16) are installed by wrangler-action in a pre-job setup
       - name: 🏗 Get dependencies
         run: npm i
@@ -113,8 +118,6 @@ jobs:
             CSV
             LINKS
             DLSstr
-            ACL4SSR_CONFIG
-            SUBCONVER
             ONLYTLS
             URL_FORWARD
         env:
@@ -125,8 +128,6 @@ jobs:
           CSV: ${{ vars.CSV }}
           LINKS: ${{ vars.LINKS }}
           DLSstr: ${{ vars.DLSstr }}
-          ACL4SSR_CONFIG: ${{ vars.ACL4SSR_CONFIG }}
-          SUBCONVER: ${{ vars.SUBCONVER }}
           ONLYTLS: ${{ vars.ONLYTLS }}
           URL_FORWARD: ${{ vars.URL_FORWARD }}
 
