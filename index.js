@@ -526,15 +526,16 @@ async function parseCsvProxyList(csvUrlStr, onlyTls, dlsStr) {
 
 	const handleHeader = (line) => {
 		const header = line.toLowerCase().split(',').map(t => t.trim());
+		const speedInd = header.findLastIndex(s => s.includes("速度") || s.includes("speed"));
 		const cols = {
 			ip: header.findIndex(s => s.startsWith('ip') || s.includes('地址')),
 			port: header.findIndex(s => s.startsWith('端口') || s.startsWith('port')),
 			tls: header.indexOf('tls'),
-			speed: header.findLastIndex(s => s.includes("速度") || s.includes("speed")),
+			speed: speedInd,
 			city: header.findIndex(s => s.includes('城市') || s.includes('city')),
 			country: header.findIndex(s => s.includes('国家') || s.includes('country')),
 			idc: header.findLastIndex(s => s.includes("数据中心") || s.includes("idc")),
-			speedUnit: header[cols.speed]?.includes('kb') ? 'KB' : header[cols.speed]?.includes('mb') ? 'MB' : '',
+			speedUnit: header[speedInd]?.includes('kb') ? 'KB' : header[speedInd]?.includes('mb') ? 'MB' : '',
 			header: header
 		};
 		return cols;
@@ -686,7 +687,7 @@ function generateClientConfigHtml(linksStr, uuid, host, onlyTls) {
 	const randomPath = `/${Math.random().toString(36).substring(2, 15)}?ed=2048`;
 	const urlTls = `?security=tls&fp=chrome&type=ws&sni=${host}&host=${host}&path=${encodeURIComponent(randomPath)}#`;
 	const urlHttp = `?security=none&fp=chrome&type=ws&host=${host}&path=${encodeURIComponent(randomPath)}#`;
-
+	const sublink = `https://${host}/${uuid}?sub`;
 	const protoLinks = [
 		`${SEC.V_PRO}://${uuid}@${host}:443${urlTls}HttpsNode`
 	];
@@ -694,10 +695,12 @@ function generateClientConfigHtml(linksStr, uuid, host, onlyTls) {
 
 	return `<!DOCTYPE html><html><head><title>Config Generator</title><style>body{background:#111;color:#eee;font-family:sans-serif;padding:2rem}pre{background:#222;padding:1rem;border-radius:8px;color:#0f0;overflow:auto}</style></head><body>
 		<h2>Gateway Configuration</h2>
+		<h3>Subscription Link</h3>
+		<pre>${sublink}</pre>
 		<h3>Original Links</h3>
 		<pre>${protoLinks.join('\n')}</pre>
 		<h3>Edge links</h3>
-		<pre>${linksStr.join('\n')}</pre>
+		<pre>${linksStr}</pre>
 	</body></html>`;
 }
 
