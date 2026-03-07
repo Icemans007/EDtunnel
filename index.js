@@ -488,7 +488,7 @@ function formatSubscriptionResponse(addresses, ctx) {
 
 	const finalLinksStr = Array.from(uniqueAddrs.values()).map(m => m[1]).join('\n');
 
-    // const needsConverter = target && target !== 'raw' && target !== 'sub';
+	// const needsConverter = target && target !== 'raw' && target !== 'sub';
 	const toDashboard = !target && userAgent.includes('mozilla');
 	// if (needsConverter) {
 	// }
@@ -524,37 +524,53 @@ async function parseCsvProxyList(csvUrlStr, onlyTls, dlsStr) {
 	const results = [];
 	const csvUrls = csvUrlStr.split(/[,\s]+/);
 
+	const handleHeader = (line) => {
+		const header = line.toLowerCase().split(',').map(t => t.trim());
+		const cols = {
+			ip: header.findIndex(s => s.startsWith('ip') || s.includes('地址')),
+			port: header.findIndex(s => s.startsWith('端口') || s.startsWith('port')),
+			tls: header.indexOf('tls'),
+			speed: header.findLastIndex(s => s.includes("速度") || s.includes("speed")),
+			city: header.findIndex(s => s.includes('城市') || s.includes('city')),
+			country: header.findIndex(s => s.includes('国家') || s.includes('country')),
+			idc: header.findLastIndex(s => s.includes("数据中心") || s.includes("idc")),
+			speedUnit: header[cols.speed]?.includes('kb') ? 'KB' : header[cols.speed]?.includes('mb') ? 'MB' : '',
+			header: header
+		};
+		return cols;
+	};
+
 	for (const url of csvUrls) {
 		try {
 			const csvData = await fetchWithTimeout(url, 12000);
 			const lines = csvData.split('\n').map(l => l.trim()).filter(Boolean);
 			if (!lines.length) continue;
 
-			// Find header line dynamically
+			// Find first header line dynamically
 			const headerIdx = lines.findIndex(l =>
 				(l.includes('地址') || l.toLowerCase().startsWith('ip')) &&
 				(l.includes('端口') || l.toLowerCase().includes('port'))
 			);
 			if (headerIdx === -1) continue;
 
-			const header = lines[headerIdx].toLowerCase().split(',').map(t => t.trim());
-			const cols = {
-				ip: header.findIndex(s => s.startsWith('ip') || s.includes('地址')),
-				port: header.findIndex(s => s.startsWith('端口') || s.startsWith('port')),
-				tls: header.indexOf('tls'),
-				speed: header.findLastIndex(s => s.includes("速度") || s.includes("speed")),
-				city: header.findIndex(s => s.includes('城市') || s.includes('city')),
-				country: header.findIndex(s => s.includes('国家') || s.includes('country')),
-				idc: header.findLastIndex(s => s.includes("数据中心") || s.includes("idc"))
-			};
-
+			let cols = handleHeader(lines[headerIdx]);
 			if (cols.ip === -1) continue;
+			let header = cols.header;
+			let speedUnit = cols.speedUnit;
 
-			let speedUnit = header[cols.speed]?.includes('kb') ? 'KB' : 'MB';
 			let addedRows = 0;
 
 			// Process rows below header
 			for (let i = headerIdx + 1; i < lines.length && (MAXROW === 0 || addedRows < MAXROW); i++) {
+				const hasNewHeader = ((lines[i].includes('地址') || lines[i].toLowerCase().startsWith('ip'))
+					&& (lines[i].includes('端口') || lines[i].toLowerCase().includes('port')));
+				if (hasNewHeader) {
+					cols = handleHeader(lines[headerIdx]);
+					if (cols.ip === -1) continue;
+					header = cols.header;
+					speedUnit = cols.speedUnit;
+					continue;
+				}
 				const row = lines[i].split(',').map(t => t.trim());
 				if (row.length !== header.length) continue;
 				if (onlyTls && row[cols.tls]?.toLowerCase() !== "true") continue;
@@ -563,8 +579,8 @@ async function parseCsvProxyList(csvUrlStr, onlyTls, dlsStr) {
 				if (DLS > 0 && cols.speed !== -1) {
 					let speed = parseFloat(row[cols.speed]);
 					if (!isNaN(speed)) {
-						if (!speedUnit) speedUnit = row[cols.speed].toLowerCase().includes('kb') ? 'KB' : 'MB';
-						if (speedUnit === 'KB') speed = Math.round(speed / 10) / 100;
+						if (!speedUnit) speedUnit = row[cols.speed].toLowerCase().includes('kb') ? 'KB' : row[cols.speed].toLowerCase().includes('mb') ? 'MB' : '';
+						if (!speedUnit && speedUnit === 'KB') speed = Math.round(speed / 10) / 100;
 						if (speed < DLS) continue;
 					}
 				}
