@@ -1,1316 +1,448 @@
-// A Cloudflare Worker-based VLESS Proxy with WebSocket Transport
+// A Cloudflare Worker-based Proxy Gateway with WebSocket Transport
 import { connect } from 'cloudflare:sockets';
 
 // ======================================
-// Constants & Default Configuration
+// 1. 安全与混淆字典 (Sensitive String Obfuscation)
+// ======================================
+const SEC = {
+	V_PRO: base64Decode('dmxlc3M='),
+	C_META: base64Decode('Y2xhc2g='),
+	S_BOX: base64Decode('c2luZ2JveA=='),
+	V2_R: base64Decode('djJyYXk='),
+	X_R: base64Decode('eHJheQ=='),
+	SS: base64Decode('c3M='),
+	SR: base64Decode('c3Ny'),
+	V_M: base64Decode('dm1lc3M=')
+};
+
+// ======================================
+// 2. 常量与默认配置 (Constants & Defaults)
 // ======================================
 const DEFAULT_PROXY_IPS = ['cdn.xn--b6gac.eu.org:443', 'cdn-all.xn--b6gac.eu.org:443'];
-const at = atob('UUE9PQ==');
-const pt = atob('ZG14bGMzTT0=');
-const ptm = atob('ZG0xbGMzTT0=');
-const ed = atob('UlVSMGRXNXVaV3c9');
-
 const WS_READY_STATE_OPEN = 1;
 const WS_READY_STATE_CLOSING = 2;
 
 // ======================================
-// Main Worker Handler
+// 3. 入口与上下文构建 (Entry & Context)
 // ======================================
 export default {
-
 	async fetch(request, env, _ctx) {
 		try {
-			const url = new URL(request.url);
-			const host = request.headers.get('Host');
-			const userAgent = request.headers.get('User-Agent')?.toLowerCase() || '';
+			const appCtx = buildContext(request, env);
 
-			// 1. Parse and validate environment configurations for this request
-			const config = parseEnvironment(env, url);
-
-			if (config.userIDs.some(uuid => !isValidUUID(uuid))) {
-				throw new Error('UUID is not valid');
+			if (appCtx.isInvalidUser) {
+				throw new Error('UUID configuration is invalid');
 			}
 
-			// 2. Handle WebSocket Upgrades (Proxy Traffic)
-			if (request.headers.get('Upgrade') === 'websocket') {
-				return await ProtocolOverWSHandler(request, config);
+			// 路由分发 (Routing Dispatch)
+			if (request.headers.get('Upgrade') !== 'websocket') {
+				return await handleHttpRouter(request, appCtx);
 			}
 
-			// 3. Handle Standard HTTP Requests (Routing)
-			let pathname = url.pathname.replace(/\/+$/, '') || '/';
-			const matchedUUID = config.userIDs.find(uuid => pathname.includes(uuid));
-			switch (true) {
-				case pathname === '/':
-					if (env.URL_FORWARD) return handleForward(env, request);
-					// 伪装页面
-					return handleDefaultPath(url, request);
-				case !!matchedUUID:
-					const args = {
-						userID: matchedUUID,
-						host,
-						url,
-						userAgent,
-						env,
-						config
-					};
-					return handleSubscriptionRequest(args);
-				default:
-					if (env.URL_FORWARD) return handleForward(env, request);
-					return new Response('Not Found', { status: 404 });
-			}
+			return await handleWebSocketRouter(request, appCtx);
 		} catch (err) {
 			return new Response(err.toString(), {
 				status: 500,
 				headers: { "Content-Type": "text/plain; charset=utf-8" }
 			});
 		}
-	}
+	},
 };
 
 /**
- * Parses environment variables safely per-request to avoid cross-request state pollution.
+ * 动态实例化当前请求上下文 (Eliminate Global State)
  */
-function parseEnvironment(env, url) {
-	const userIDs = (env.UUID || '').trim().replace(/[\s,]+/g, ',').split(',').filter(Boolean);
+function buildContext(request, env) {
+	const url = new URL(request.url);
+	const host = request.headers.get('Host') || url.hostname;
+	const userAgent = request.headers.get('User-Agent')?.toLowerCase() || '';
+	const { UUID, PROXYIP, SOCKS5, SOCKS5_RELAY, URL_FORWARD, ADD, SUB, CSV, DLSstr, ONLYTLS } = env;
 
-	// Proxy IP Selection
-	let proxyIP, proxyPort;
-	const requestProxyip = url.searchParams.get("proxyip") || url.searchParams.get("pyip");
-	const proxySource = requestProxyip || env.PROXYIP;
+	// 1. 用户 ID 解析
+	const userIDs = (UUID?.trim() || '').replace(/[\s,]+/g, ',').split(',').filter(Boolean);
+	const isInvalidUser = userIDs.some(uuid => !isValidUUID(uuid));
 
-	if (proxySource) {
-		const proxyAddresses = proxySource.trim().split(/[,\s]+/).filter(addr => !addr.startsWith("#"));
-		const selectedProxy = proxyAddresses[Math.floor(Math.random() * proxyAddresses.length)];
-		if (!selectedProxy.includes('[')) {
-			[proxyIP, proxyPort = '443'] = selectedProxy.split(':');
-		} else {
-			[, proxyIP, proxyPort = '443'] = selectedProxy.match(/(\[[a-f0-9:]+\])(?::(\d+))?/i);
-		}
-	} else {
-		const randomDefault = DEFAULT_PROXY_IPS[Math.floor(Math.random() * DEFAULT_PROXY_IPS.length)];
-		[proxyIP, proxyPort] = randomDefault.split(':');
-	}
+	// 2. 代理 IP 解析 (优先请求参数，其次环境变量，最后回退默认)
+	const [proxyIp, proxyPort] = resolveProxyIpConfig(url, PROXYIP);
 
-	// SOCKS5 Configuration
-	let enableSocks = false;
-	let parsedSocks5Address = null;
-	const socks5Address = env.SOCKS5 || '';
-	const socks5Relay = env.SOCKS5_RELAY || false;
-
-	if (socks5Address) {
+	// 3. SOCKS5 解析
+	let socks5Config = null;
+	const s5AddressStr = SOCKS5?.trim();
+	if (s5AddressStr) {
 		try {
-			const socks5Addresses = socks5Address.trim().split(/[,\s]+/);
-			const selectedSocks5 = socks5Addresses[Math.floor(Math.random() * socks5Addresses.length)];
-			parsedSocks5Address = socks5AddressParser(selectedSocks5);
-			enableSocks = true;
-		} catch (err) {
-			console.log("SOCKS5 Parse Error:", err.toString());
+			const s5Addresses = s5AddressStr.split(/[,\s]+/);
+			const selectedS5 = s5Addresses[Math.floor(Math.random() * s5Addresses.length)];
+			socks5Config = parseSocks5Address(selectedS5);
+		} catch (e) {
+			console.error('Invalid SOCKS5 config', e);
 		}
 	}
+
+	// 4. 其他配置与特征
+	const pathname = url.pathname.replace(/\/+$/, '') || '/';
+	const matchedUserId = userIDs.find(uuid => pathname.includes(uuid)) || '';
+
+	const hasSubscriptionParams = url.searchParams.has("cfproxylist") || url.searchParams.has("cfproxycsv") || url.searchParams.has("proxysub");
+	const target = determineSubscriptionTarget(url, userAgent);
+
+	let onlyTls = ONLYTLS ?? true;
+	if (url.searchParams.has("notTls")) onlyTls = false;
+	if (host.includes('pages.dev')) onlyTls = true;
 
 	return {
+		url, host, pathname, userAgent, env,
 		userIDs,
-		proxyIP,
-		proxyPort,
-		enableSocks,
-		parsedSocks5Address,
-		socks5Relay,
-		onlyTls: env.ONLYTLS ?? true
+		matchedUserId,
+		isInvalidUser,
+		proxyIp, proxyPort,
+		socks5Config,
+		socks5Relay: !!SOCKS5_RELAY,
+		urlForward: URL_FORWARD,
+		onlyTls,
+		params: { ADD, SUB, CSV, DLSstr, target, hasSubscriptionParams }
 	};
 }
 
-/**
- * @param {Object} env
- * @param {Request} request - The incoming request object
- * @returns {Promise<Response>}
- */
-function handleForward(env, request) {
-	const url = new URL(request.url);
-	return fetch(new Request(env.URL_FORWARD + url.search, request));
+// ======================================
+// 4. HTTP 路由引擎 (HTTP Control Plane)
+// ======================================
+async function handleHttpRouter(request, ctx) {
+	const { pathname, matchedUserId } = ctx;
+
+	if (pathname === '/') {
+		if (ctx.urlForward) return proxyForward(ctx, request);
+		return renderFakeDriveView(ctx); // 伪装页
+	}
+
+	if (pathname === '/cfrequest') {
+		return new Response(JSON.stringify(request.cf, null, 4), {
+			status: 200,
+			headers: { "Content-Type": "application/json;charset=utf-8" },
+		});
+	}
+
+	// 匹配到隐藏的 UUID 路径，生成订阅和配置
+	if (matchedUserId && pathname === `/${matchedUserId}`) {
+		return await generateSubscription(ctx);
+	}
+
+	if (ctx.urlForward) return proxyForward(ctx, request);
+	return render404Nginx();
 }
 
-/**
- * Handles default path requests when no specific route matches.
- * Generates and returns a cloud drive interface HTML page.
- * @param {URL} url - The URL object of the request
- * @param {Request} request - The incoming request object
- * @returns {Response} HTML response with cloud drive interface
- */
-function handleDefaultPath(url, request) {
-	const host = request.headers.get('Host');
-	const DrivePage = `
-	  <!DOCTYPE html>
-	  <html lang="en">
-	  <head>
-		  <meta charset="UTF-8">
-		  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-		  <title>${host} - Cloud Drive</title>
-		  <style>
-			  body {
-				  font-family: Arial, sans-serif;
-				  line-height: 1.6;
-				  margin: 0;
-				  padding: 20px;
-				  background-color: #f4f4f4;
-			  }
-			  .container {
-				  max-width: 800px;
-				  margin: auto;
-				  background: white;
-				  padding: 20px;
-				  border-radius: 5px;
-				  box-shadow: 0 0 10px rgba(0,0,0,0.1);
-			  }
-			  h1 {
-				  color: #333;
-			  }
-			  .file-list {
-				  list-style-type: none;
-				  padding: 0;
-			  }
-			  .file-list li {
-				  background: #f9f9f9;
-				  margin-bottom: 10px;
-				  padding: 10px;
-				  border-radius: 3px;
-				  display: flex;
-				  align-items: center;
-			  }
-			  .file-list li:hover {
-				  background: #f0f0f0;
-			  }
-			  .file-icon {
-				  margin-right: 10px;
-				  font-size: 1.2em;
-			  }
-			  .file-link {
-				  text-decoration: none;
-				  color: #0066cc;
-				  flex-grow: 1;
-			  }
-			  .file-link:hover {
-				  text-decoration: underline;
-			  }
-			  .upload-area {
-				  margin-top: 20px;
-				  padding: 40px;
-				  background: #e9e9e9;
-				  border: 2px dashed #aaa;
-				  border-radius: 5px;
-				  text-align: center;
-				  cursor: pointer;
-				  transition: all 0.3s ease;
-			  }
-			  .upload-area:hover, .upload-area.drag-over {
-				  background: #d9d9d9;
-				  border-color: #666;
-			  }
-			  .upload-area h2 {
-				  margin-top: 0;
-				  color: #333;
-			  }
-			  #fileInput {
-				  display: none;
-			  }
-			  .upload-icon {
-				  font-size: 48px;
-				  color: #666;
-				  margin-bottom: 10px;
-			  }
-			  .upload-text {
-				  font-size: 18px;
-				  color: #666;
-			  }
-			  .upload-status {
-				  margin-top: 20px;
-				  font-style: italic;
-				  color: #666;
-			  }
-			  .file-actions {
-				  display: flex;
-				  gap: 10px;
-			  }
-			  .delete-btn {
-				  color: #ff4444;
-				  cursor: pointer;
-				  background: none;
-				  border: none;
-				  padding: 5px;
-			  }
-			  .delete-btn:hover {
-				  color: #ff0000;
-			  }
-			  .clear-all-btn {
-				  background-color: #ff4444;
-				  color: white;
-				  border: none;
-				  padding: 10px 15px;
-				  border-radius: 4px;
-				  cursor: pointer;
-				  margin-bottom: 20px;
-			  }
-			  .clear-all-btn:hover {
-				  background-color: #ff0000;
-			  }
-		  </style>
-	  </head>
-	  <body>
-		  <div class="container">
-			  <h1>Cloud Drive</h1>
-			  <p>Welcome to your personal cloud storage. Here are your uploaded files:</p>
-			  <button id="clearAllBtn" class="clear-all-btn">Clear All Files</button>
-			  <ul id="fileList" class="file-list">
-			  </ul>
-			  <div id="uploadArea" class="upload-area">
-				  <div class="upload-icon">📁</div>
-				  <h2>Upload a File</h2>
-				  <p class="upload-text">Drag and drop a file here or click to select</p>
-				  <input type="file" id="fileInput" hidden>
-			  </div>
-			  <div id="uploadStatus" class="upload-status"></div>
-		  </div>
-		  <script>
-			  function loadFileList() {
-				  const fileList = document.getElementById('fileList');
-				  const savedFiles = JSON.parse(localStorage.getItem('uploadedFiles')) || [];
-				  fileList.innerHTML = '';
-				  savedFiles.forEach((file, index) => {
-					  const li = document.createElement('li');
-					  li.innerHTML = \`
-						  <span class="file-icon">📄</span>
-						  <a href="https://ipfs.io/ipfs/\${file.Url.split('/').pop()}" class="file-link" target="_blank">\${file.Name}</a>
-						  <div class="file-actions">
-							  <button class="delete-btn" onclick="deleteFile(\${index})">
-								  <span class="file-icon">❌</span>
-							  </button>
-						  </div>
-					  \`;
-					  fileList.appendChild(li);
-				  });
-			  }
-
-			  function deleteFile(index) {
-				  const savedFiles = JSON.parse(localStorage.getItem('uploadedFiles')) || [];
-				  savedFiles.splice(index, 1);
-				  localStorage.setItem('uploadedFiles', JSON.stringify(savedFiles));
-				  loadFileList();
-			  }
-
-			  document.getElementById('clearAllBtn').addEventListener('click', () => {
-				  if (confirm('Are you sure you want to clear all files?')) {
-					  localStorage.removeItem('uploadedFiles');
-					  loadFileList();
-				  }
-			  });
-
-			  loadFileList();
-
-			  const uploadArea = document.getElementById('uploadArea');
-			  const fileInput = document.getElementById('fileInput');
-			  const uploadStatus = document.getElementById('uploadStatus');
-
-			  uploadArea.addEventListener('dragover', (e) => {
-				  e.preventDefault();
-				  uploadArea.classList.add('drag-over');
-			  });
-
-			  uploadArea.addEventListener('dragleave', () => {
-				  uploadArea.classList.remove('drag-over');
-			  });
-
-			  uploadArea.addEventListener('drop', (e) => {
-				  e.preventDefault();
-				  uploadArea.classList.remove('drag-over');
-				  const files = e.dataTransfer.files;
-				  if (files.length) {
-					  handleFileUpload(files[0]);
-				  }
-			  });
-
-			  uploadArea.addEventListener('click', () => {
-				  fileInput.click();
-			  });
-
-			  fileInput.addEventListener('change', (e) => {
-				  const file = e.target.files[0];
-				  if (file) {
-					  handleFileUpload(file);
-				  }
-			  });
-
-			  async function handleFileUpload(file) {
-				  uploadStatus.textContent = \`Uploading: \${file.name}...\`;
-
-				  const formData = new FormData();
-				  formData.append('file', file);
-
-				  try {
-					  const response = await fetch('https://app.img2ipfs.org/api/v0/add', {
-						  method: 'POST',
-						  body: formData,
-						  headers: {
-							  'Accept': 'application/json',
-						  },
-					  });
-
-					  if (!response.ok) {
-						  throw new Error('Upload failed');
-					  }
-
-					  const result = await response.json();
-					  uploadStatus.textContent = \`File uploaded successfully! IPFS Hash: \${result.Hash}\`;
-
-					  const savedFiles = JSON.parse(localStorage.getItem('uploadedFiles')) || [];
-					  savedFiles.push(result);
-					  localStorage.setItem('uploadedFiles', JSON.stringify(savedFiles));
-
-					  loadFileList();
-
-				  } catch (error) {
-					  console.error('Error:', error);
-					  uploadStatus.textContent = 'Upload failed. Please try again.';
-				  }
-			  }
-		  </script>
-	  </body>
-	  </html>
-	  <!-- a padding to disable MSIE and Chrome friendly error page -->
-	  <!-- a padding to disable MSIE and Chrome friendly error page -->
-	  <!-- a padding to disable MSIE and Chrome friendly error page -->
-	  <!-- a padding to disable MSIE and Chrome friendly error page -->
-	  <!-- a padding to disable MSIE and Chrome friendly error page -->
-	`;
-
-	// 返回伪装的网盘页面
-	return new Response(DrivePage, {
-		headers: {
-			"content-type": "text/html;charset=utf-8",
-		},
-	});
+function proxyForward(ctx, request) {
+	const targetUrl = new URL(ctx.urlForward + ctx.url.pathname + ctx.url.search);
+	const headers = new Headers([...request.headers].filter(([key]) => !key.toLowerCase().startsWith('cf-')));
+	headers.set('Host', targetUrl.hostname);
+	return fetch(targetUrl, { method: request.method, headers, body: request.body, redirect: 'follow' });
 }
 
 // ======================================
-// Core Proxy Logic
+// 5. WebSocket 协议引擎 (WebSocket Data Plane)
 // ======================================
-async function ProtocolOverWSHandler(request, config) {
-
+async function handleWebSocketRouter(request, ctx) {
 	const webSocketPair = new WebSocketPair();
 	const [client, webSocket] = Object.values(webSocketPair);
-
 	webSocket.accept();
 
-	let address = '';
-	let portWithRandomLog = '';
-	const log = (/** @type {string} */ info, /** @type {string | undefined} */ event) => {
-		console.log(`[${address}:${portWithRandomLog}] ${info}`, event || '');
-	};
+	let connInfo = { address: '', portLog: '', isDns: false };
+	const log = (info) => console.log(`[${connInfo.address}:${connInfo.portLog}] ${info}`);
 	const earlyDataHeader = request.headers.get('sec-websocket-protocol') || '';
 
-	const readableWebSocketStream = MakeReadableWebSocketStream(webSocket, earlyDataHeader, log);
+	const wsStream = buildWsReadableStream(webSocket, earlyDataHeader, log);
+	let remoteSocketObj = { value: null }; // 使用对象保持引用
 
-	/** @type {{ value: import("@cloudflare/workers-types").Socket | null}}*/
-	let remoteSocketWapper = {
-		value: null,
-	};
-	let isDns = false;
-
-	// ws --> remote
-	readableWebSocketStream.pipeTo(new WritableStream({
-		// @ts-ignore
+	wsStream.pipeTo(new WritableStream({
 		async write(chunk, controller) {
-			if (isDns) {
-				return await handleDNSQuery(chunk, webSocket, null, log);
-			}
-			if (remoteSocketWapper.value) {
-				const writer = remoteSocketWapper.value.writable.getWriter()
+			if (connInfo.isDns) return handleDNSQuery(chunk, webSocket, null, log);
+
+			// 如果 Socket 已经建立，透传数据
+			if (remoteSocketObj.value) {
+				const writer = remoteSocketObj.value.writable.getWriter();
 				await writer.write(chunk);
 				writer.releaseLock();
 				return;
 			}
 
-			const {
-				hasError,
-				message,
-				addressType,
-				portRemote = 443,
-				addressRemote = '',
-				rawDataIndex,
-				ProtocolVersion = new Uint8Array([0, 0]),
-				isUDP,
-			} = ProcessProtocolHeader(chunk, config.userIDs);
-			address = addressRemote;
-			portWithRandomLog = `${portRemote}--${Math.random()} ${isUDP ? 'udp ' : 'tcp '
-				} `;
-			if (hasError) {
-				// controller.error(message);
-				throw new Error(message); // cf seems has bug, controller.error will not end stream
-			}
-			// Handle UDP connections for DNS (port 53) only
-			if (isUDP) {
-				if (portRemote === 53) {
-					isDns = true;
-				} else {
-					throw new Error('UDP proxy is only enabled for DNS (port 53)');
+			// 尚未建立，解析握手包
+			const parsedReq = decodeVProtocolHeader(chunk, ctx.userIDs);
+			connInfo.address = parsedReq.addressRemote;
+			connInfo.portLog = `${parsedReq.portRemote}--${Math.random()} ${parsedReq.isUDP ? 'udp' : 'tcp'}`;
+
+			if (parsedReq.hasError) throw new Error(parsedReq.message);
+
+			if (parsedReq.isUDP) {
+				if (parsedReq.portRemote === 53) {
+					connInfo.isDns = true;
+					return;
 				}
-				return; // Early return after setting isDns or throwing error
+				throw new Error('UDP proxy is only enabled for DNS (port 53)');
 			}
-			// ["version", "附加信息长度 N"]
-			const ProtocolResponseHeader = new Uint8Array([ProtocolVersion[0], 0]);
-			const rawClientData = chunk.slice(rawDataIndex);
 
-			if (isDns) {
-				return handleDNSQuery(rawClientData, webSocket, ProtocolResponseHeader, log);
-			}
-			// @ts-ignore
-			HandleTCPOutBound(remoteSocketWapper, addressType, addressRemote, portRemote, rawClientData, webSocket, ProtocolResponseHeader, config, log);
-		},
-		close() {
-			log(`readableWebSocketStream is close`);
-		},
-		abort(reason) {
-			log(`readableWebSocketStream is abort`, JSON.stringify(reason));
-		},
-	})).catch((err) => {
-		log('readableWebSocketStream pipeTo error', err);
-	});
+			// V-Protocol 回包头: ["version", "附加信息长度"]
+			const vResponseHeader = new Uint8Array([parsedReq.protocolVersion[0], 0]);
+			const rawClientData = chunk.slice(parsedReq.rawDataIndex);
 
-	return new Response(null, {
-		status: 101,
-		// @ts-ignore
-		webSocket: client,
-	});
+			if (connInfo.isDns) return handleDNSQuery(rawClientData, webSocket, vResponseHeader, log);
+
+			await establishOutboundTCP(remoteSocketObj, parsedReq, rawClientData, webSocket, vResponseHeader, ctx, log);
+		},
+		close: () => log(`WS readable closed`),
+		abort: (reason) => log(`WS readable aborted: ${reason}`),
+	})).catch(err => log(`WS pipeTo error: ${err}`));
+
+	return new Response(null, { status: 101, webSocket: client });
 }
 
-/**
- * Handles outbound TCP connections for the proxy.
- * Establishes connection to remote server and manages data flow.
- * @param {Socket} remoteSocket - Socket for remote connection
- * @param {number} addressType - Type of address (IPv4/IPv6)
- * @param {string} addressRemote - Remote server address
- * @param {number} portRemote - Remote server port
- * @param {Uint8Array} rawClientData - Raw data from client
- * @param {WebSocket} webSocket - WebSocket connection
- * @param {Uint8Array} ProtocolResponseHeader - Protocol response header
- * @param {Object} config - config
- * @param {Function} log - Logging function
- */
-async function HandleTCPOutBound(remoteSocket, addressType, addressRemote, portRemote, rawClientData, webSocket, ProtocolResponseHeader, config, log) {
-	async function connectAndWrite(address, port, socks = false) {
-		/** @type {import("@cloudflare/workers-types").Socket} */
+// ======================================
+// 6. 出站网络层 (Outbound Network Layer)
+// ======================================
+async function establishOutboundTCP(remoteSocketObj, parsedReq, rawData, ws, vHeader, ctx, log) {
+	const { addressType, addressRemote, portRemote } = parsedReq;
+
+	async function doConnect(address, port, useSocks) {
 		let tcpSocket;
-		if (config.socks5Relay || socks) {
-			tcpSocket = await socks5Connect(addressType, address, port, config.parsedSocks5Address, log)
+		if (useSocks && ctx.socks5Config) {
+			tcpSocket = await connectSocks5Tunnel(addressType, address, port, ctx.socks5Config, log);
 		} else {
-			tcpSocket = connect({
-				hostname: address,
-				port: port,
-			});
+			tcpSocket = connect({ hostname: address, port: port });
 		}
-		// @ts-ignore
-		remoteSocket.value = tcpSocket;
+		if (!tcpSocket) throw new Error('Failed to connect to outbound');
+
+		remoteSocketObj.value = tcpSocket;
 		log(`connected to ${address}:${port}`);
 		const writer = tcpSocket.writable.getWriter();
-		await writer.write(rawClientData); // first write, normal is tls client hello
+		await writer.write(rawData); // 写入 Client Hello
 		writer.releaseLock();
 		return tcpSocket;
 	}
 
-	// if the cf connect tcp socket have no incoming data, we retry to redirect ip
-	async function retry() {
-		if (config.enableSocks) {
-			tcpSocket = await connectAndWrite(addressRemote, portRemote, true);
-		} else {
-			tcpSocket = await connectAndWrite(config.proxyIP || addressRemote, config.proxyPort || portRemote, false);
-		}
-		// no matter retry success or not, close websocket
-		tcpSocket.closed.catch(error => {
-			console.log('retry tcpSocket closed error', error);
-		}).finally(() => {
-			safeCloseWebSocket(webSocket);
-		})
-		RemoteSocketToWS(tcpSocket, webSocket, ProtocolResponseHeader, null, log);
-	}
-
-	let tcpSocket = await connectAndWrite(addressRemote, portRemote);
-
-	// when remoteSocket is ready, pass to websocket
-	// remote--> ws
-	RemoteSocketToWS(tcpSocket, webSocket, ProtocolResponseHeader, retry, log);
-}
-
-/**
- * Creates a readable stream from WebSocket server.
- * Handles early data and WebSocket messages.
- * @param {WebSocket} webSocketServer - WebSocket server instance
- * @param {string} earlyDataHeader - Header for early data (0-RTT)
- * @param {Function} log - Logging function
- * @returns {ReadableStream} Stream of WebSocket data
- */
-function MakeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
-	// @ts-ignore
-	let readableStreamCancel = false;
-	const stream = new ReadableStream({
-		start(controller) {
-			webSocketServer.addEventListener('message', (event) => {
-				const message = event.data;
-				controller.enqueue(message);
-			});
-
-			webSocketServer.addEventListener('close', () => {
-				safeCloseWebSocket(webSocketServer);
-				controller.close();
-			});
-
-			webSocketServer.addEventListener('error', (err) => {
-				log('webSocketServer has error');
-				controller.error(err);
-			});
-			const { earlyData, error } = base64ToArrayBuffer(earlyDataHeader);
-			if (error) {
-				controller.error(error);
-			} else if (earlyData) {
-				controller.enqueue(earlyData);
+	// 错误重试闭包
+	async function retryFallback() {
+		let tcpSocket;
+		try {
+			// 严格区分 SOCKS5 和 proxyIP 的 Fallback 路由
+			if (ctx.socks5Config) {
+				// 如果有 SOCKS，走 SOCKS 去真实目标地址
+				tcpSocket = await doConnect(addressRemote, portRemote, true);
+			} else {
+				// 否则 fallback 到 CF 优选 IP (proxyIp)
+				tcpSocket = await doConnect(ctx.proxyIp || addressRemote, ctx.proxyPort || portRemote, false);
 			}
-		},
 
-		pull(_controller) {
-			// if ws can stop read if stream is full, we can implement backpressure
-			// https://streams.spec.whatwg.org/#example-rs-push-backpressure
-		},
+			// 增加底层 Socket 关闭事件的兜底拦截，防止假死
+			tcpSocket.closed.catch(error => {
+				log(`Retry tcpSocket closed with error: ${error}`);
+			}).finally(() => {
+				safeCloseSocket(ws);
+			});
 
-		cancel(reason) {
-			log(`ReadableStream was canceled, due to ${reason}`)
-			readableStreamCancel = true;
-			safeCloseWebSocket(webSocketServer);
+			bindRemoteToWs(tcpSocket, ws, vHeader, null, log);
+		} catch (e) {
+			log(`Fallback failed: ${e.message}`);
+			safeCloseSocket(ws);
 		}
-	});
-
-	return stream;
-}
-
-function ProcessProtocolHeader(protocolBuffer, userIDs) {
-	if (protocolBuffer.byteLength < 24) {
-		return { hasError: true, message: 'invalid data' };
 	}
 
-	const dataView = new DataView(protocolBuffer);
-	const version = dataView.getUint8(0);
-	const slicedBufferString = stringify(new Uint8Array(protocolBuffer.slice(1, 17)));
-	console.log(`userID: ${slicedBufferString}`);
+	try {
+		// 初次尝试：如果 socks5Relay 为 true，则全部强制走 SOCKS5，否则直连
+		let tcpSocket = await doConnect(addressRemote, portRemote, ctx.socks5Relay);
+		bindRemoteToWs(tcpSocket, ws, vHeader, retryFallback, log);
+	} catch (e) {
+		log(`Initial connect failed, trying fallback. Error: ${e.message}`);
+		await retryFallback();
+	}
+}
 
-	const isValidUser = userIDs.some(uuid => slicedBufferString === uuid.trim());
-	if (!isValidUser) return { hasError: true, message: 'invalid user' };
+async function bindRemoteToWs(remoteSocket, ws, vHeader, retryCallback, log) {
+	let hasData = false;
+	try {
+		await remoteSocket.readable.pipeTo(new WritableStream({
+			async write(chunk) {
+				if (ws.readyState !== WS_READY_STATE_OPEN) throw new Error('WS not open');
+				hasData = true;
+				if (vHeader) {
+					ws.send(await new Blob([vHeader, chunk]).arrayBuffer());
+					vHeader = null;
+				} else {
+					ws.send(chunk);
+				}
+			},
+			close: () => log(`Remote closed, incoming data: ${hasData}`)
+		}));
+	} catch (error) {
+		log(`RemoteSocketToWS error: ${error.message}`);
+		safeCloseSocket(ws);
+	}
+
+	if (!hasData && retryCallback) {
+		log(`No incoming data, triggering retry`);
+		await retryCallback();
+	}
+}
+
+// ======================================
+// 7. 协议解析引擎 (Protocol Decoding Layer)
+// ======================================
+function decodeVProtocolHeader(buffer, validUuids) {
+	if (buffer.byteLength < 24) return { hasError: true, message: 'invalid length' };
+
+	const dataView = new DataView(buffer);
+	const version = dataView.getUint8(0);
+	const slicedUuidHex = formatUuidHex(new Uint8Array(buffer.slice(1, 17)));
+
+	const isValid = validUuids.some(u => u.trim() === slicedUuidHex);
+	if (!isValid) return { hasError: true, message: 'invalid uuid auth' };
 
 	const optLength = dataView.getUint8(17);
-	const command = dataView.getUint8(18 + optLength);
-
-	if (command !== 1 && command !== 2) {
-		return { hasError: true, message: `command ${command} is not supported, command 01-tcp,02-udp,03-mux` };
-	}
+	const command = dataView.getUint8(18 + optLength); // 1: TCP, 2: UDP
+	if (command !== 1 && command !== 2) return { hasError: true, message: `command ${command} is not supported, command 01-tcp,02-udp,03-mux` };
 
 	const portIndex = 18 + optLength + 1;
 	const portRemote = dataView.getUint16(portIndex);
 	const addressType = dataView.getUint8(portIndex + 2);
-	let addressValue, addressLength, addressValueIndex;
+	let addrValue, addrLen, addrIndex;
 
 	switch (addressType) {
-		case 1:
-			addressLength = 4;
-			addressValueIndex = portIndex + 3;
-			addressValue = new Uint8Array(protocolBuffer.slice(addressValueIndex, addressValueIndex + addressLength)).join('.');
+		case 1: // IPv4
+			addrLen = 4;
+			addrIndex = portIndex + 3;
+			addrValue = new Uint8Array(buffer.slice(addrIndex, addrIndex + addrLen)).join('.');
 			break;
-		case 2:
-			addressLength = dataView.getUint8(portIndex + 3);
-			addressValueIndex = portIndex + 4;
-			addressValue = new TextDecoder().decode(protocolBuffer.slice(addressValueIndex, addressValueIndex + addressLength));
+		case 2: // Domain
+			addrLen = dataView.getUint8(portIndex + 3);
+			addrIndex = portIndex + 4;
+			addrValue = new TextDecoder().decode(buffer.slice(addrIndex, addrIndex + addrLen));
 			break;
-		case 3:
-			addressLength = 16;
-			addressValueIndex = portIndex + 3;
-			addressValue = Array.from({ length: 8 }, (_, i) => dataView.getUint16(addressValueIndex + i * 2).toString(16)).join(':');
+		case 3: // IPv6
+			addrLen = 16;
+			addrIndex = portIndex + 3;
+			addrValue = Array.from({ length: 8 }, (_, i) => dataView.getUint16(addrIndex + i * 2).toString(16)).join(':');
 			break;
 		default:
-			return { hasError: true, message: `invalid addressType: ${addressType}` };
-	}
-
-	if (!addressValue) {
-		return { hasError: true, message: `addressValue is empty, addressType is ${addressType}` };
+			return { hasError: true, message: `unknown addr type: ${addressType}` };
 	}
 
 	return {
 		hasError: false,
-		addressRemote: addressValue,
+		addressRemote: addrValue,
 		addressType,
 		portRemote,
-		rawDataIndex: addressValueIndex + addressLength,
+		rawDataIndex: addrIndex + addrLen,
 		protocolVersion: new Uint8Array([version]),
 		isUDP: command === 2
 	};
 }
 
-/**
- * Converts remote socket connection to WebSocket.
- * Handles data transfer between socket and WebSocket.
- * @param {Socket} remoteSocket - Remote socket connection
- * @param {WebSocket} webSocket - WebSocket connection
- * @param {ArrayBuffer} protocolResponseHeader - Protocol response header
- * @param {Function} retry - Retry function for failed connections
- * @param {Function} log - Logging function
- */
-async function RemoteSocketToWS(remoteSocket, webSocket, protocolResponseHeader, retry, log) {
-	let hasIncomingData = false;
+// ======================================
+// 8. SOCKS5 级联与 DNS 劫持模块
+// ======================================
+async function connectSocks5Tunnel(addressType, addressRemote, portRemote, s5conf, log) {
+	const { username, password, hostname, port } = s5conf;
+	const socket = connect({ hostname, port });
+	const writer = socket.writable.getWriter();
+	const reader = socket.readable.getReader();
 
 	try {
-		await remoteSocket.readable.pipeTo(
-			new WritableStream({
-				async write(chunk) {
-					if (webSocket.readyState !== WS_READY_STATE_OPEN) {
-						throw new Error('WebSocket is not open');
-					}
+		await writer.write(new Uint8Array([5, 2, 0, 2])); // Init
+		let res = (await reader.read()).value;
+		if (!res || res[0] !== 0x05) throw new Error(`SOCKS5 version err: expected 5, got ${res?.[0]}`);
 
-					hasIncomingData = true;
-
-					if (protocolResponseHeader) {
-						webSocket.send(await new Blob([protocolResponseHeader, chunk]).arrayBuffer());
-						protocolResponseHeader = null;
-					} else {
-						webSocket.send(chunk);
-					}
-				},
-				close() {
-					log(`Remote connection readable closed. Had incoming data: ${hasIncomingData}`);
-				},
-				abort(reason) {
-					console.error(`Remote connection readable aborted:`, reason);
-				},
-			})
-		);
-	} catch (error) {
-		console.error(`RemoteSocketToWS error:`, error.stack || error);
-		safeCloseWebSocket(webSocket);
-	}
-
-	if (!hasIncomingData && retry) {
-		log(`No incoming data, retrying`);
-		await retry();
-	}
-}
-
-/**
- * Converts base64 string to ArrayBuffer.
- * @param {string} base64Str - Base64 encoded string
- * @returns {Object} Object containing decoded data or error
- */
-function base64ToArrayBuffer(base64Str) {
-	if (!base64Str) {
-		return { earlyData: null, error: null };
-	}
-	try {
-		// Convert modified Base64 for URL (RFC 4648) to standard Base64
-		base64Str = base64Str.replace(/-/g, '+').replace(/_/g, '/');
-		// Decode Base64 string
-		const binaryStr = atob(base64Str);
-		// Convert binary string to ArrayBuffer
-		const buffer = new ArrayBuffer(binaryStr.length);
-		const view = new Uint8Array(buffer);
-		for (let i = 0; i < binaryStr.length; i++) {
-			view[i] = binaryStr.charCodeAt(i);
+		// 服务端拒绝了所有我们提供的认证方法
+		if (res[1] === 0xff) {
+			throw new Error('SOCKS5 server: no acceptable auth methods (0xFF)');
 		}
-		return { earlyData: buffer, error: null };
-	} catch (error) {
-		return { earlyData: null, error };
-	}
-}
 
-/**
- * Validates UUID format.
- * @param {string} uuid - UUID string to validate
- * @returns {boolean} True if valid UUID
- */
-function isValidUUID(uuid) {
-	// More precise UUID regex pattern
-	const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-	return uuidRegex.test(uuid);
-}
-
-/**
- * Safely closes WebSocket connection.
- * Prevents exceptions during WebSocket closure.
- * @param {WebSocket} socket - WebSocket to close
- */
-function safeCloseWebSocket(socket) {
-	try {
-		if (socket.readyState === WS_READY_STATE_OPEN || socket.readyState === WS_READY_STATE_CLOSING) {
-			socket.close();
+		if (res[1] === 0x02) { // Need Auth
+			if (!username || !password) throw new Error('SOCKS5 auth missing');
+			const enc = new TextEncoder();
+			const authReq = new Uint8Array([1, username.length, ...enc.encode(username), password.length, ...enc.encode(password)]);
+			await writer.write(authReq);
+			res = (await reader.read()).value;
+			if (res[0] !== 0x01 || res[1] !== 0x00) throw new Error('SOCKS5 auth fail');
 		}
-	} catch (error) {
-		console.error('safeCloseWebSocket error:', error);
+		else if (res[1] !== 0x00) {
+			// 防御性编程：如果是 0x00 (免密) 以外的其他未知方法，也应当阻断
+			throw new Error(`SOCKS5 unexpected auth method: ${res[1]}`);
+		}
+
+		// Connect Command
+		const enc = new TextEncoder();
+		let dstAddr;
+		if (addressType === 1) dstAddr = new Uint8Array([1, ...addressRemote.split('.').map(Number)]);
+		else if (addressType === 2) dstAddr = new Uint8Array([3, addressRemote.length, ...enc.encode(addressRemote)]);
+		else dstAddr = new Uint8Array([4, ...addressRemote.split(':').flatMap(x => [parseInt(x.slice(0, 2), 16), parseInt(x.slice(2), 16)])]);
+
+		await writer.write(new Uint8Array([5, 1, 0, ...dstAddr, portRemote >> 8, portRemote & 0xff]));
+		res = (await reader.read()).value;
+		if (res[1] !== 0x00) throw new Error('SOCKS5 open fail');
+
+		log("SOCKS5 tunnel established");
+		writer.releaseLock();
+		reader.releaseLock();
+		return socket;
+	} catch (e) {
+		log(`SOCKS5 Error: ${e.message}`);
+		writer.releaseLock();
+		reader.releaseLock();
+		return null;
 	}
 }
 
-const byteToHex = Array.from({ length: 256 }, (_, i) => (i + 0x100).toString(16).slice(1));
-
-/**
- * Converts byte array to hex string without validation.
- * @param {Uint8Array} arr - Byte array to convert
- * @param {number} offset - Starting offset
- * @returns {string} Hex string
- */
-function unsafeStringify(arr, offset = 0) {
-	return [
-		byteToHex[arr[offset]],
-		byteToHex[arr[offset + 1]],
-		byteToHex[arr[offset + 2]],
-		byteToHex[arr[offset + 3]],
-		'-',
-		byteToHex[arr[offset + 4]],
-		byteToHex[arr[offset + 5]],
-		'-',
-		byteToHex[arr[offset + 6]],
-		byteToHex[arr[offset + 7]],
-		'-',
-		byteToHex[arr[offset + 8]],
-		byteToHex[arr[offset + 9]],
-		'-',
-		byteToHex[arr[offset + 10]],
-		byteToHex[arr[offset + 11]],
-		byteToHex[arr[offset + 12]],
-		byteToHex[arr[offset + 13]],
-		byteToHex[arr[offset + 14]],
-		byteToHex[arr[offset + 15]]
-	].join('').toLowerCase();
-}
-
-/**
- * Safely converts byte array to hex string with validation.
- * @param {Uint8Array} arr - Byte array to convert
- * @param {number} offset - Starting offset
- * @returns {string} Hex string
- */
-function stringify(arr, offset = 0) {
-	const uuid = unsafeStringify(arr, offset);
-	if (!isValidUUID(uuid)) {
-		throw new TypeError("Stringified UUID is invalid");
-	}
-	return uuid;
-}
-
-/**
- * Handles DNS query through UDP.
- * Processes DNS requests and forwards them.
- * @param {ArrayBuffer} udpChunk - UDP data chunk
- * @param {WebSocket} webSocket - WebSocket connection
- * @param {ArrayBuffer} protocolResponseHeader - Protocol response header
- * @param {Function} log - Logging function
- */
-async function handleDNSQuery(udpChunk, webSocket, protocolResponseHeader, log) {
-	// no matter which DNS server client send, we alwasy use hard code one.
-	// beacsue someof DNS server is not support DNS over TCP
+async function handleDNSQuery(udpChunk, ws, vHeader, log) {
+	const dnsHost = '8.8.4.4', dnsPort = 53;
 	try {
-		const dnsServer = '8.8.4.4'; // change to 1.1.1.1 after cf fix connect own ip bug
-		const dnsPort = 53;
-		/** @type {ArrayBuffer | null} */
-		let vessHeader = protocolResponseHeader;
-		/** @type {import("@cloudflare/workers-types").Socket} */
-		const tcpSocket = connect({
-			hostname: dnsServer,
-			port: dnsPort,
-		});
-
-		log(`connected to ${dnsServer}:${dnsPort}`);
+		log(`connected to ${dnsHost}:${dnsPort}`);
+		const tcpSocket = connect({ hostname: dnsHost, port: dnsPort });
 		const writer = tcpSocket.writable.getWriter();
 		await writer.write(udpChunk);
 		writer.releaseLock();
+
 		await tcpSocket.readable.pipeTo(new WritableStream({
 			async write(chunk) {
-				if (webSocket.readyState === WS_READY_STATE_OPEN) {
-					if (vessHeader) {
-						webSocket.send(await new Blob([vessHeader, chunk]).arrayBuffer());
-						vessHeader = null;
-					} else {
-						webSocket.send(chunk);
-					}
+				if (ws.readyState !== WS_READY_STATE_OPEN) return;
+				if (vHeader) {
+					ws.send(await new Blob([vHeader, chunk]).arrayBuffer());
+					vHeader = null;
+				} else {
+					ws.send(chunk);
 				}
 			},
 			close() {
-				log(`dns server(${dnsServer}) tcp is close`);
+				log(`dns server(${dnsHost}) tcp is close`);
 			},
 			abort(reason) {
-				console.error(`dns server(${dnsServer}) tcp is abort`, reason);
-			},
-		}));
-	} catch (error) {
-		console.error(
-			`handleDNSQuery have exception, error: ${error.message}`
-		);
-	}
-}
-
-/**
- * Establishes SOCKS5 proxy connection.
- * @param {number} addressType - Type of address
- * @param {string} addressRemote - Remote address
- * @param {number} portRemote - Remote port
- * @param {Object} parsedSocks5Address - socks5Address
- * @param {Function} log - Logging function
- * @returns {Promise<Socket>} Connected socket
- */
-async function socks5Connect(addressType, addressRemote, portRemote, parsedSocks5Address, log) {
-	const { username, password, hostname, port } = parsedSocks5Address;
-	// Connect to the SOCKS server
-	const socket = connect({
-		hostname,
-		port,
-	});
-
-	// Request head format (Worker -> Socks Server):
-	// +----+----------+----------+
-	// |VER | NMETHODS | METHODS  |
-	// +----+----------+----------+
-	// | 1  |    1     | 1 to 255 |
-	// +----+----------+----------+
-
-	// https://en.wikipedia.org/wiki/SOCKS#SOCKS5
-	// For METHODS:
-	// 0x00 NO AUTHENTICATION REQUIRED
-	// 0x02 USERNAME/PASSWORD https://datatracker.ietf.org/doc/html/rfc1929
-	const socksGreeting = new Uint8Array([5, 2, 0, 2]);
-
-	const writer = socket.writable.getWriter();
-
-	await writer.write(socksGreeting);
-	log('sent socks greeting');
-
-	const reader = socket.readable.getReader();
-	const encoder = new TextEncoder();
-	let res = (await reader.read()).value;
-	// Response format (Socks Server -> Worker):
-	// +----+--------+
-	// |VER | METHOD |
-	// +----+--------+
-	// | 1  |   1    |
-	// +----+--------+
-	if (res[0] !== 0x05) {
-		log(`socks server version error: ${res[0]} expected: 5`);
-		return;
-	}
-	if (res[1] === 0xff) {
-		log("no acceptable methods");
-		return;
-	}
-
-	// if return 0x0502
-	if (res[1] === 0x02) {
-		log("socks server needs auth");
-		if (!username || !password) {
-			log("please provide username/password");
-			return;
-		}
-		// +----+------+----------+------+----------+
-		// |VER | ULEN |  UNAME   | PLEN |  PASSWD  |
-		// +----+------+----------+------+----------+
-		// | 1  |  1   | 1 to 255 |  1   | 1 to 255 |
-		// +----+------+----------+------+----------+
-		const authRequest = new Uint8Array([
-			1,
-			username.length,
-			...encoder.encode(username),
-			password.length,
-			...encoder.encode(password)
-		]);
-		await writer.write(authRequest);
-		res = (await reader.read()).value;
-		// expected 0x0100
-		if (res[0] !== 0x01 || res[1] !== 0x00) {
-			log("fail to auth socks server");
-			return;
-		}
-	}
-
-	// Request data format (Worker -> Socks Server):
-	// +----+-----+-------+------+----------+----------+
-	// |VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
-	// +----+-----+-------+------+----------+----------+
-	// | 1  |  1  | X'00' |  1   | Variable |    2     |
-	// +----+-----+-------+------+----------+----------+
-	// ATYP: address type of following address
-	// 0x01: IPv4 address
-	// 0x03: Domain name
-	// 0x04: IPv6 address
-	// DST.ADDR: desired destination address
-	// DST.PORT: desired destination port in network octet order
-
-	// addressType
-	// 1--> ipv4  addressLength =4
-	// 2--> domain name
-	// 3--> ipv6  addressLength =16
-	let DSTADDR;	// DSTADDR = ATYP + DST.ADDR
-	switch (addressType) {
-		case 1:
-			DSTADDR = new Uint8Array(
-				[1, ...addressRemote.split('.').map(Number)]
-			);
-			break;
-		case 2:
-			DSTADDR = new Uint8Array(
-				[3, addressRemote.length, ...encoder.encode(addressRemote)]
-			);
-			break;
-		case 3:
-			DSTADDR = new Uint8Array(
-				[4, ...addressRemote.split(':').flatMap(x => [parseInt(x.slice(0, 2), 16), parseInt(x.slice(2), 16)])]
-			);
-			break;
-		default:
-			log(`invalid addressType is ${addressType}`);
-			return;
-	}
-	const socksRequest = new Uint8Array([5, 1, 0, ...DSTADDR, portRemote >> 8, portRemote & 0xff]);
-	await writer.write(socksRequest);
-	log('sent socks request');
-
-	res = (await reader.read()).value;
-	// Response format (Socks Server -> Worker):
-	//  +----+-----+-------+------+----------+----------+
-	// |VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
-	// +----+-----+-------+------+----------+----------+
-	// | 1  |  1  | X'00' |  1   | Variable |    2     |
-	// +----+-----+-------+------+----------+----------+
-	if (res[1] === 0x00) {
-		log("socks connection opened");
-	} else {
-		log("fail to open socks connection");
-		return;
-	}
-	writer.releaseLock();
-	reader.releaseLock();
-	return socket;
-}
-
-/**
- * Parses SOCKS5 address string.
- * @param {string} address - SOCKS5 address string
- * @returns {Object} Parsed address information
- */
-function socks5AddressParser(address) {
-	let [latter, former] = address.split("@").reverse();
-	let username, password, hostname, port;
-	if (former) {
-		const formers = former.split(":");
-		if (formers.length !== 2) {
-			throw new Error('Invalid SOCKS address format');
-		}
-		[username, password] = formers;
-	}
-	const latters = latter.split(":");
-	port = Number(latters.pop());
-	if (isNaN(port)) {
-		throw new Error('Invalid SOCKS address format');
-	}
-	hostname = latters.join(":");
-	const regex = /^\[[^\]]+\]$/;
-	if (hostname.includes(":") && !regex.test(hostname)) {
-		throw new Error('Invalid SOCKS address format');
-	}
-	return {
-		username,
-		password,
-		hostname,
-		port,
-	}
-}
-
-function generateSubscriptionWebpage(userID, hostName, config) {
-	const randomPath = () => '/' + Math.random().toString(36).substring(2, 15) + '?ed=2048';
-	const commonUrlPartHttp = `?security=none&fp=chrome&type=ws&host=${hostName}&path=${encodeURIComponent(randomPath())}#`;
-	const commonUrlPartHttps = `?security=tls&sni=${hostName}&fp=chrome&type=ws&host=${hostName}&path=${encodeURIComponent(randomPath())}#`;
-
-	// Prepare output string for userID
-	const sublink = `https://${hostName}/${userID}`;
-	const subbestip = `https://${hostName}/bestip/${userID}`;
-	// HTML Head with CSS and FontAwesome library
-	const htmlHead = `
-  <head>
-    <title>${atob(ed)}: Configuration</title>
-    <meta name='viewport' content='width=device-width, initial-scale=1'>
-    <style>
-      body {
-        font-family: 'Roboto', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        background-color: #000000;
-        color: #ffffff;
-        line-height: 1.6;
-        padding: 20px;
-        max-width: 1200px;
-        margin: 0 auto;
-      }
-      .container {
-        background-color: #111111;
-        border-radius: 8px;
-        box-shadow: 0 4px 6px rgba(255, 255, 255, 0.1);
-        padding: 20px;
-        margin-bottom: 20px;
-      }
-      h1, h2 {
-        color: #ffffff;
-      }
-      .config-item {
-        background-color: #222222;
-        border: 1px solid #333333;
-        border-radius: 4px;
-        padding: 15px;
-        margin-bottom: 15px;
-      }
-      .config-item h3 {
-        margin-top: 0;
-        color: #ffffff;
-      }
-      .btn {
-        background-color: #ffffff;
-        color: #000000;
-        border: none;
-        padding: 10px 15px;
-        border-radius: 4px;
-        cursor: pointer;
-        transition: background-color 0.3s, color 0.3s;
-      }
-      .btn:hover {
-        background-color: #cccccc;
-      }
-      .btn-group {
-        margin-top: 10px;
-      }
-      .btn-group .btn {
-        margin-right: 10px;
-      }
-      pre {
-        background-color: #333333;
-        border: 1px solid #444444;
-        border-radius: 4px;
-        padding: 10px;
-        white-space: pre-wrap;
-        word-wrap: break-word;
-        color: #00ff00;
-      }
-      .logo {
-        float: left;
-        margin-right: 20px;
-        margin-bottom: 20px;
-		max-width: 30%;
-      }
-      @media (max-width: 768px) {
-        .logo {
-          float: none;
-          display: block;
-          margin: 0 auto 20px;
-          max-width: 90%; /* Adjust the max-width to fit within the container */
-        }
-        .btn-group {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-        }
-        .btn-group .btn {
-          margin-bottom: 10px;
-          width: 100%;
-          text-align: center;
-        }
-      }
-      .code-container {
-        position: relative;
-        margin-bottom: 15px;
-      }
-      .code-container pre {
-        margin: 0;
-        padding-right: 100px; /* Make space for the button */
-      }
-      .copy-btn {
-        position: absolute;
-        top: 5px;
-        right: 5px;
-        padding: 5px 10px;
-        font-size: 0.8em;
-      }
-      .subscription-info {
-        margin-top: 20px;
-        background-color: #222222;
-        border-radius: 4px;
-        padding: 15px;
-      }
-      .subscription-info h3 {
-        color: #ffffff;
-        margin-top: 0;
-      }
-      .subscription-info ul {
-        padding-left: 20px;
-      }
-      .subscription-info li {
-        margin-bottom: 10px;
-      }
-    </style>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
-  </head>
-  `;
-
-	const header = `
-    <div class="container">
-      <h1>订阅配置（优选）</h1>
-      <p>Welcome! This function generates configuration for the ${atob(pt)} protocol. If you found this useful, please check our GitHub project:</p>
-      <p><a href="https://github.com/Icemans007/${atob(ed)}" target="_blank" style="color: #00ff00;">${atob(ed)} - https://github.com/Icemans007/${atob(ed)}</a></p>
-      <div style="clear: both;"></div>
-      <div class="btn-group">
-        <a href="javascript: void(0)" onclick="copyToClipboard('${sublink}')" class="btn"><i class="fas fa-star"></i>自适应订阅（推荐！）</a>
-        <a href="clash://install-config?url=${encodeURIComponent(sublink + "?clash")}" class="btn" target="_blank"><i class="fas fa-bolt"></i> Clash-Meta 订阅</a>
-        <a href="${sublink}?clash" class="btn" target="_blank"><i class="fas fa-link"></i> Clash Link</a>
-        <a href="${sublink}?singbox" class="btn" target="_blank"><i class="fas fa-link"></i> Singbox Link</a>
-		<a href="${subbestip}" class="btn" target="_blank"><i class="fas fa-star"></i> Best IP Subscription</a>
-      </div>
-      <div class="subscription-info">
-        <h3>选项说明:</h3>
-        <ul>
-          <li><strong>自适应订阅:</strong> 客户端自适应的链接（仅适用于支持 ${atob(pt)} 协议 的客户端）。为许多<b>不同国家/地区</b>提供最佳服务器 IP 的精选列表</li>
-          <li><strong>Clash-Meta 订阅:</strong> 打开具有预配置设置的 Clash 客户端。最适合移动设备上的 Clash 用户。</li>
-          <li><strong>Clash-Meta Link:</strong> 用于将 Clash 配置转换为 Clash 格式的 Web 链接。对于手动导入或故障排除很有用。</li>
-          <li><strong>Singbox Link:</strong> 用于将 Singbox 的 Web 链接。对于手动导入或故障排除很有用。</li>
-		  <li><strong>Best IP Subscription:</strong> Provides a curated list of optimal server IPs for many <b>different countries</b>.</li>
-        </ul>
-        <p>选择最适合您的客户和需求的选项。</p>
-      </div>
-    </div>
-  `;
-
-	const configOutput = function () {
-		let vessPart = [];
-		let crashPart = ["proxies:"];
-
-		vessPart = vessPart.concat([443].map(port => {
-			const urlPart = encodeURIComponent(`${hostName}-HTTPS-${port}`);
-			return atob(pt) + '://' + userID + atob(at) + hostName + ':' + port + commonUrlPartHttps + urlPart;
-		}));
-
-		crashPart = crashPart.concat([443].map(port => {
-			return `  - name: ${hostName}-HTTPS-${port}
-    server: ${hostName}
-    port: ${port}
-    type: ${atob(pt)}
-    uuid: ${userID}
-    network: ws
-    tls: true
-    udp: true
-    sni: ${hostName}
-    client-fingerprint: chrome
-    ws-opts:
-    path: "/?ed=2048"
-    headers:
-      host: ${hostName}`;
-		}));
-
-		if (!config.onlyTls) {
-			vessPart = vessPart.concat([80].map(port => {
-				const urlPart = encodeURIComponent(`${hostName}-HTTP-${port}`);
-				return atob(pt) + '://' + userID + atob(at) + hostName + ':' + port + commonUrlPartHttp + urlPart;
-			}));
-
-			crashPart = crashPart.concat([80].map(port => {
-				return `  - name: ${hostName}-HTTP-${port}
-    server: ${hostName}
-    port: ${port}
-    type: ${atob(pt)}
-    uuid: ${userID}
-    network: ws
-    tls: none
-    udp: true
-    sni: ${hostName}
-    client-fingerprint: chrome
-    ws-opts:
-    path: "/?ed=2048"
-    headers:
-      host: ${hostName}`;
-			}));
-		}
-
-		let codehtml = function (partType) {
-			let html = '';
-			for (let code of partType) {
-				html += `${code}\n`;
+				console.error(`dns server(${dnsHost}) tcp is abort`, reason);
 			}
-			return html;
-		};
-
-		return `
-      <div class="container config-item">
-	  	<h2>代理配置</h2>
-        <h4>UUID: ${userID}</h2>
-        <h4>PROXYIP: ${config.proxyIP}:${config.proxyPort}</h2>
-        <h3>${atob(pt)} 配置</h3>
-		<div class="code-container">
-		  <pre><code>${codehtml(vessPart)}</code></pre>
-		  <button class="btn copy-btn" onclick='copyToClipboard("${btoa(codehtml(vessPart))}", true)'><i class="fas fa-copy"></i> 复制</button>
-		</div>
-        <h3>clash 配置</h3>
-		<div class="code-container">
-		  <pre><code>${codehtml(crashPart)}</code></pre>
-		  <button class="btn copy-btn" onclick='copyToClipboard("${btoa(codehtml(crashPart))}", true)'><i class="fas fa-copy"></i> 复制</button>
-		</div>
-      </div>
-    `;
-	}
-
-	return `
-  <html>
-  ${htmlHead}
-  <body>
-    ${header}
-    ${configOutput()}
-  </body>
-  <script>
-    function copyToClipboard(text, conver=false) {
-      navigator.clipboard.writeText(conver ? atob(text) : text)
-        .then(() => {
-          alert("Copied to clipboard");
-        })
-        .catch((err) => {
-          console.error("Failed to copy to clipboard:", err);
-        });
-    }
-  </script>
-  </html>`;
+		}));
+	} catch (e) { log(`DNS error: ${e.message}`); }
 }
 
-/**
- * Generates subscription content.
- * @returns {Promise<Response>} Subscription content
- */
-async function handleSubscriptionRequest({ userID, host, userAgent, url, env, config }) {
-
-	const hasProxyParams = url.searchParams.has("cfproxylist") || url.searchParams.has("cfproxycsv") || url.searchParams.has("proxysub");
-
-	if (url.searchParams.has("notTls")) config.onlyTls = false;
-	if (host.includes('pages.dev')) config.onlyTls = true;
-
-	if (!hasProxyParams && userAgent.toLowerCase().includes('mozilla')) {
-		return new Response(generateSubscriptionWebpage(userID, host, config), {
-			status: 200,
-			headers: { "Content-Type": "text/html; charset=utf-8" },
-		});
-	}
-
-	// Generate and merge proxy lists
-	const addresses = [];
-	const extracted = await fetchExternalProxies(env, url, userID, host, config);
-	addresses.push(...extracted);
-
-	return formatSubscriptionResponse(addresses, userID, host, config);
+// ======================================
+// 9. 配置与订阅生成器 (Subscription & Generator)
+// ======================================
+async function generateSubscription(ctx) {
+	const addresses = await fetchExternalProxies(ctx);
+	return formatSubscriptionResponse(addresses, ctx);
 }
 
-async function fetchExternalProxies(env, url, userID, host, config) {
+function determineSubscriptionTarget(url, userAgent) {
+	if (url.searchParams.get('target')) return url.searchParams.get('target').toLowerCase();
+	if (url.searchParams.has('sub')) return "sub";
+	if (url.searchParams.has('raw')) return "raw";
+	if (url.searchParams.has('clash') || userAgent.includes('clash') || userAgent.includes('meta')) return "clash";
+	if (url.searchParams.has('sb') || url.searchParams.has('singbox') || url.searchParams.has('sing-box') || userAgent.includes('singbox') || userAgent.includes('sing-box')) return "singbox";
+	return "";
+}
+
+async function fetchExternalProxies(ctx) {
+	const { env, url, matchedUserId, host, onlyTls, params: { DLSstr, hasSubscriptionParams } } = ctx;
 	const results = [];
-	const dlsStr = url.searchParams.get("DLSstr") || "5";
-	const hasProxyParams = url.searchParams.has("cfproxylist") || url.searchParams.has("cfproxycsv") || url.searchParams.has("proxysub");
-
+	const dlsStr = url.searchParams.get("DLSstr") || DLSstr || 5;
 	const [textListStr, csvListStr, subProviderStr] = [
-		hasProxyParams ? url.searchParams.get("cfproxylist") : env.ADD,
-		hasProxyParams ? url.searchParams.get("cfproxycsv") : env.CSV,
-		hasProxyParams ? url.searchParams.get("proxysub") : env.SUB
+		hasSubscriptionParams ? url.searchParams.get("cfproxylist") : env.ADD,
+		hasSubscriptionParams ? url.searchParams.get("cfproxycsv") : env.CSV,
+		hasSubscriptionParams ? url.searchParams.get("proxysub") : env.SUB
 	];
 
 	if (textListStr) {
@@ -1320,16 +452,17 @@ async function fetchExternalProxies(env, url, userID, host, config) {
 		results.push(...await parseTextProxyList(urls));
 	}
 	if (csvListStr) {
-		results.push(...await parseCsvProxyList(csvListStr, config.onlyTls, dlsStr));
+		results.push(...await parseCsvProxyList(csvListStr, onlyTls, dlsStr));
 	}
 	if (subProviderStr) {
-		results.push(...await parseSubProviderLinks(subProviderStr, userID, host));
+		results.push(...await parseSubProviderLinks(subProviderStr, matchedUserId, host));
 	}
 
 	return results;
 }
 
-function formatSubscriptionResponse(addresses, userID, host, config) {
+function formatSubscriptionResponse(addresses, ctx) {
+	const { userAgent, matchedUserId, host, onlyTls, params: { target } } = ctx;
 	const uniqueTags = new Map();
 	const uniqueAddrs = new Map();
 	const speed_reg = /\d+\.?\d*(?= ?[MK]B\/s)/i;
@@ -1342,8 +475,8 @@ function formatSubscriptionResponse(addresses, userID, host, config) {
 		// 如果新链接Tag中有测速数据的Tag比没有的好，数据大的更好
 		if (!(!existing || !eSpeed && pSpeed || eSpeed && pSpeed && pSpeed[0] > eSpeed[0])) continue;
 
-		const tlsQuery = config.onlyTls ? "&security=tls" : "";
-		let link = fullLink || `${scheme}://${userID}@${addr}:${port}?type=ws${tlsQuery}&host=${host}&sni=${host}&path=${encodeURIComponent("/?ed=2048")}#${encodeURIComponent(rawTag)}`;
+		const tlsQuery = onlyTls ? "&security=tls" : "";
+		let link = fullLink || `${scheme}://${matchedUserId}@${addr}:${port}?type=ws${tlsQuery}&host=${host}&sni=${host}&path=${encodeURIComponent("/?ed=2048")}#${encodeURIComponent(rawTag)}`;
 
 		// Handle duplicate tags
 		let count = uniqueTags.get(rawTag) || 0;
@@ -1355,352 +488,319 @@ function formatSubscriptionResponse(addresses, userID, host, config) {
 
 	const finalLinksStr = Array.from(uniqueAddrs.values()).map(m => m[1]).join('\n');
 
-	return new Response(base64Encode(finalLinksStr), {
+    // const needsConverter = target && target !== 'raw' && target !== 'sub';
+	const toDashboard = !target && userAgent.includes('mozilla');
+	// if (needsConverter) {
+	// }
+
+	if (toDashboard) {
+		return new Response(generateClientConfigHtml(finalLinksStr, matchedUserId, host, onlyTls), {
+			headers: { "Content-Type": "text/html; charset=utf-8" },
+		});
+	}
+
+	return new Response(target === 'raw' ? finalLinksStr : base64Encode(finalLinksStr), {
 		status: 200,
 		headers: { "Content-Type": "text/plain; charset=utf-8" }
 	});
 }
 
-/*
-获取下面格式Row
-abc.com:端口#节点名
-123.123.123.123:端口#节点名
-[abc:1234::1]:端口#节点名
-
-https://exp.net/getCfIp		#还有是带链接地址的需要fetch
-*/
-async function parseTextProxyList(add) {
-	if (!add || (add = add.trim()).length == 0) {
-		return [];
-	}
-	const ips = await fetchRowApi(add);
+async function parseTextProxyList(urlsStr) {
+	if (!urlsStr?.trim()) return [];
+	const rawTextLines = await fetchUrlsToLines(urlsStr, 8000);
 	const regExp = /^((?:[\w-]+\.)+[a-z-]+|\d{1,3}(?:\.\d{1,3}){3}|\[[a-f0-9:]+\])(?::(\d+))?(?:#(.+)$)?/i;
 
-	return ips.map(ip => {
-		const match = regExp.exec(ip);
-		if (!match) {
-			return;
-		}
-		let [, host, port, tag = host] = match;
-		if (!port) {
-			port = "443";
-		}
-
-		return [atob(pt), host, port, tag];
+	return rawTextLines.map(line => {
+		const match = regExp.exec(line);
+		if (!match) return null;
+		let [, host, port = '443', tag = host] = match;
+		return [SEC.V_PRO, host, port, tag];
 	}).filter(Boolean);
 }
 
-// 通过csv文件获取cf代理IP
-async function parseCsvProxyList(csv, onlyTls, DLSstr = 5) {
-	if (!csv || (csv = csv.trim()).length == 0) {
-		return [];
-	}
+async function parseCsvProxyList(csvUrlStr, onlyTls, dlsStr) {
+	if (!csvUrlStr?.trim()) return [];
+	const [DLS = 5, MAXROW = 8] = dlsStr.split(":").map(Number);
+	const results = [];
+	const csvUrls = csvUrlStr.split(/[,\s]+/);
 
-	// csv 数据太多，默认是排序的，每个CSV表格只获取符合条件的前8条
-	const [DLS = 5, MAXROW = 8] = String(DLSstr).split(":").map(d => isFinite(+d) ? +d : undefined);
-	const addresses = [];
-
-	const handleCSV = function (lines) {
-		lines = lines.split('\n').map(txt => txt.trim()).filter(Boolean);
-		if (!lines || lines.length === 0) {
-			console.warn('CSV文件为空: ', csv);
-			return;
-		}
-		let header = null;
-		let huf = false;	// 标记header头是否重新更新
-		let ipColIndex = -1;
-		let portColIndex = -1;
-		let tlsColIndex = -1;
-		let countryColIndex = -1; // 国家
-		let cityColIndex = -1;  // 城市
-		let speedColIndex = -1; // csv 速度
-		let idcColIndex = -1; // 数据中心
-		let continentColIndex = -1; // 洲
-		let speedUnits = ""; // csv 测速单位
-		let maxrow = 0;
-
-		for (let i = 0; i < lines.length; i++) {
-			if (lines[i].length === 0) {
-				continue;
-			}
-			if ((lines[i].includes('地址') || lines[i].toLowerCase().startsWith('ip'))
-				&& (lines[i].includes('端口') || lines[i].toLowerCase().includes('port'))) {
-				header = lines[i].toLowerCase().split(',').map(txt => txt.trim());
-				huf = true;
-			}
-			if (!header) {
-				console.warn('CSV文件缺少头部字段');
-				return;
-			}
-
-			if (huf) {
-				huf = false;
-				maxrow = MAXROW;
-				ipColIndex = header.findIndex(str => str.startsWith('ip') || str.includes('地址'));
-				portColIndex = header.findIndex(str => str.startsWith('端口') || str.startsWith('port'));
-				if (ipColIndex === -1) {
-					console.warn('CSV文件缺少必需的字段');
-					return;
-				}
-
-				tlsColIndex = header.indexOf('tls');
-				countryColIndex = header.findIndex(str => str.includes('国家') || str.includes('country'));
-				cityColIndex = header.findIndex(str => str.includes('城市') || str.includes('city'));
-				speedColIndex = header.findLastIndex(item => item.includes("速度") || item.includes("speed"));
-				idcColIndex = header.findLastIndex(item => item.includes("数据中心") || item.includes("idc"));
-				continentColIndex = header.findLastIndex(item => item.includes("地区") || item.includes("region"));
-				speedUnits = "";	// 换了header, 单位重新计算
-
-				if (header[speedColIndex]?.includes('kb')) {
-					speedUnits = "KB";
-				}
-				else if (header[speedColIndex]?.includes('mb')) {
-					speedUnits = "MB";
-				}
-				continue;
-			}
-
-			if (MAXROW > 0 && maxrow < 1) {
-				continue;
-			}
-			const columns = lines[i].split(',').map(txt => txt.trim());
-			if (columns.length !== header.length) {
-				console.warn('CSV文件数据错乱');
-				return;
-			}
-
-			if (onlyTls && columns[tlsColIndex]?.toLowerCase() !== "true") continue;
-			// 在数据中获取速度单位
-			if (!speedUnits) {
-				if (columns[speedColIndex]?.toLowerCase().includes('kb')) {
-					speedUnits = "KB";
-				} else if (columns[speedColIndex]?.toLowerCase().includes('mb')) {
-					speedUnits = "MB";
-				}
-			}
-			// 检查速度大于DLS(DLS 是MB)
-			let dataSpeed = parseFloat(columns[speedColIndex]);
-			if (DLS > 0 && !isNaN(dataSpeed)) {
-				if (speedUnits === "KB") {
-					dataSpeed = Math.round(dataSpeed / 10) / 100;
-				}
-				if (dataSpeed < DLS) {
-					continue;
-				}
-			}
-			// 端口
-			let port = columns[portColIndex] || '443';
-			if (!columns[portColIndex] && columns[tlsColIndex]?.toLowerCase() !== 'true') {
-				port = '80';
-			}
-
-			let tag = "";
-			if (columns[cityColIndex]) tag += "-" + columns[cityColIndex];
-			if (columns[countryColIndex]) tag += "-" + columns[countryColIndex];
-			if (columns[continentColIndex]) tag += "-" + columns[continentColIndex];
-			if (columns[idcColIndex]) tag += "-" + columns[idcColIndex];
-			if (tag.length == 0) tag += columns[ipColIndex];
-			else tag = tag.slice(1);
-
-			const address = [atob(pt), columns[ipColIndex], port, tag];
-			addresses.push(address);
-			MAXROW > 0 && maxrow--;
-		}
-	}
-
-	const csvUrls = csv.split(/[,\s]+/);
-	// 避免api 链接调用循环
-	const apiAvoidDupRef = new Set();
-	for (const furl of csvUrls) {
+	for (const url of csvUrls) {
 		try {
-			const res = await fetchApiWrapper(furl, 12000, apiAvoidDupRef);
-			handleCSV(res);
-		} catch (err) {
-			console.error('获取地址时出错: ' + furl, err.message);
-			return []; // 如果有错误，直接返回
+			const csvData = await fetchWithTimeout(url, 12000);
+			const lines = csvData.split('\n').map(l => l.trim()).filter(Boolean);
+			if (!lines.length) continue;
+
+			// Find header line dynamically
+			const headerIdx = lines.findIndex(l =>
+				(l.includes('地址') || l.toLowerCase().startsWith('ip')) &&
+				(l.includes('端口') || l.toLowerCase().includes('port'))
+			);
+			if (headerIdx === -1) continue;
+
+			const header = lines[headerIdx].toLowerCase().split(',').map(t => t.trim());
+			const cols = {
+				ip: header.findIndex(s => s.startsWith('ip') || s.includes('地址')),
+				port: header.findIndex(s => s.startsWith('端口') || s.startsWith('port')),
+				tls: header.indexOf('tls'),
+				speed: header.findLastIndex(s => s.includes("速度") || s.includes("speed")),
+				city: header.findIndex(s => s.includes('城市') || s.includes('city')),
+				country: header.findIndex(s => s.includes('国家') || s.includes('country')),
+				idc: header.findLastIndex(s => s.includes("数据中心") || s.includes("idc"))
+			};
+
+			if (cols.ip === -1) continue;
+
+			let speedUnit = header[cols.speed]?.includes('kb') ? 'KB' : 'MB';
+			let addedRows = 0;
+
+			// Process rows below header
+			for (let i = headerIdx + 1; i < lines.length && (MAXROW === 0 || addedRows < MAXROW); i++) {
+				const row = lines[i].split(',').map(t => t.trim());
+				if (row.length !== header.length) continue;
+				if (onlyTls && row[cols.tls]?.toLowerCase() !== "true") continue;
+
+				// Speed Check
+				if (DLS > 0 && cols.speed !== -1) {
+					let speed = parseFloat(row[cols.speed]);
+					if (!isNaN(speed)) {
+						if (!speedUnit) speedUnit = row[cols.speed].toLowerCase().includes('kb') ? 'KB' : 'MB';
+						if (speedUnit === 'KB') speed = Math.round(speed / 10) / 100;
+						if (speed < DLS) continue;
+					}
+				}
+
+				const port = row[cols.port] || (row[cols.tls]?.toLowerCase() === 'true' ? '443' : '80');
+				const tagParts = [row[cols.city], row[cols.country], row[cols.idc]].filter(Boolean);
+				const tag = tagParts.length > 0 ? tagParts.join('-') : row[cols.ip];
+
+				results.push([SEC.V_PRO, row[cols.ip], port, tag]);
+				addedRows++;
+			}
+		} catch (e) {
+			console.error(`CSV Fetch Error for ${url}:`, e.message);
 		}
 	}
-
-	return addresses;
+	return results;
 }
 
-// 通过第三方订阅器获取代理地址
-async function parseSubProviderLinks(subapi, userID, host) {
-	if (!subapi || (subapi = subapi.trim()).length == 0) {
-		return [];
-	}
-	const subapis = subapi.trim().split(/[\n,]+/);
+async function parseSubProviderLinks(subUrlStr, userID, host) {
+	if (!subUrlStr?.trim()) return [];
+	const subUrls = subUrlStr.trim().split(/[\n,]+/);
+	const results = [];
 
 	// 向第三方订阅生成器请求前，需要将自身的CF节点的UUID和节点地址使用假数据掩盖
 	const fakeUserID = crypto.randomUUID();
-	const fakeHost = `${generateRandomStr(8)}.${generateRandomStr(6)}.${[".net", ".com", ".org", ".edu", ".cn", ".jp", ".xyz", ".us"].at(Math.random() * 8 | 0)}`;
+	const fakeHost = generateDomain();
 
-	const generNum = new Set();
-	const fetch_sub = async function (sub) {
-		// 订阅器地址
-		const converSplit = sub.split("://");
-		if (converSplit.length < 2) {
-			sub = "https://" + converSplit[0];
-		}
-		// 一个Gener 生成的订阅地址够大，所以只允许3个
-		if (generNum.has(sub) || generNum.size >= 3) {
-			return [];
-		}
-		generNum.add(sub);
+	for (let sub of subUrls) {
+		if (sub.trim().startsWith("#")) continue;
 
-		const url = `${sub}/sub?host=${fakeHost}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2048")}`;
+		const fetchUrl = `${sub}/sub?host=${fakeHost}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2048")}`;
 		try {
-			// 可能是base64编码串
-			let encodeStr = await fetchApiWrapper(url, 12000, null, 'v2rayn.xray');
-			// 将Base64数据解码
-			encodeStr = (isBase64(encodeStr) ? base64Decode(encodeStr) : encodeStr);
-			// 将假数据还原
-			encodeStr = encodeStr.replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host)
-			return encodeStr.split('\n');
-		} catch (err) {
-			console.error('解析ProxyGener地址时出错: ' + url, err);
-			return []; // 如果有错误，直接返回
+			let data = await fetchWithTimeout(fetchUrl, 12000, 'v2rayn.xray');
+			if (isBase64(data)) data = base64Decode(data);
+			data = data.replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host);
+			results.push(...data.split('\n').filter(Boolean));
+		} catch (e) {
+			console.error(`Sub Provider Fetch Error:`, e.message);
 		}
 	}
-	const links = (await Promise.all(subapis.map(async data => {
-		if (data.charAt(0) === '#') return;
-		return fetch_sub(data);
-	}))).filter(Boolean);
-
-	return linkPageParser(links);
+	return extractStandardProxyLinks(results);
 }
 
-async function linkPageParser(addrs) {
-	if (!addrs || addrs.length == 0) {
-		return [];
+// Resolves a list of nested API URLs into a flat array of lines
+async function fetchUrlsToLines(configsStr, timeoutMs = 8000) {
+	const configs = configsStr.trim().split(/[\n,]+/);
+	const results = [];
+
+	for (let line of configs) {
+		line = line.trim();
+		if (!line || line.startsWith('#')) continue;
+
+		let fetchUrl = "";
+		if (line.startsWith("https://") || line.startsWith("http://")) fetchUrl = line;
+		else {
+			results.push(line);
+			continue;
+		}
+
+		try {
+			const data = await fetchWithTimeout(fetchUrl, timeoutMs);
+			const nestedLines = await fetchUrlsToLines(data, timeoutMs);
+			results.push(...nestedLines);
+		} catch (e) {
+			console.error(`Fetch API list error: ${line}`);
+		}
 	}
-	// 各种代理协议
+	return results;
+}
+
+function extractStandardProxyLinks(linkLines) {
 	const regExp = /^(\w+):\/\/(?:[^@\s]+@)?([^?#\s\/]+)[^#\s]*(?:#(.*))?$/;
+	const results = [];
 
-	return (await Promise.allSettled(addrs.map(async addr => {
-		const match = regExp.exec(addr.trim());
-		if (!match || !match[0]) {
-			return;
-		}
+	for (const line of linkLines) {
+		const match = regExp.exec(line.trim());
+		if (!match) continue;
+		let [, scheme, authHost, tagEnc] = match;
+		let host, port, tag;
 
-		let host, port, tag, link = match[0];
 		try {
-			switch (match[1]) {
-				case atob("c3Ny"):
-				case "http":
-				case "https":
-					return;
-				case atob(ptm):
-					if (!match[2]) throw new Error(`Invalid ${match[1]} address string: ${match[0]}`);
-					({ add: host, port, ps: tag = host } = JSON.parse(base64Decode(match[2])));
-					break;
-				default:
-					const hostPost = match[2].split(":");
-					if (hostPost.length < 2) {
-						throw new Error(`Invalid ${match[1]} address with no port number: ${match[0]}`);
-					}
-					port = hostPost.pop();
-					if (isNaN(+port)) {
-						throw new Error(`Invalid ${match[1]} address Invalid port number: ${match[0]}`);
-					}
-					host = hostPost.join(":");
-					const regex = /^\[[^\]]+\]$/;
-					if (host.includes(":") && !regex.test(host)) {
-						throw new Error(`Invalid SOCKS v6 address format: ${match[2]}`);
-					}
-					tag = match[3] && decodeURIComponent(match[3]) || host;
+			if (scheme === SEC.SR) continue;
+			if (scheme === SEC.V_M) {
+				const parsed = JSON.parse(base64Decode(authHost));
+				host = parsed.add;
+				port = parsed.port;
+				tag = parsed.ps || host;
+			} else {
+				const parts = authHost.split(":");
+				port = parts.pop();
+				host = parts.join(":");
+				tag = tagEnc ? decodeURIComponent(tagEnc) : host;
 			}
-		} catch (err) {
-			console.warn(err.message);
-			return;
+			results.push([scheme, host, port, tag, line]);
+		} catch (e) {
+			continue; // Skip invalid lines safely
 		}
-		return [[match[1], host, port, tag, link]];
-	}))).flatMap(m => m.status === "fulfilled" ? m.value : undefined).filter(Boolean);
+	}
+	return results;
 }
 
-async function fetchRowApi(configs, apiOutTime = 8000) {
-	// apiAvoidDupRef 避免是链接循环调用
-	const apiAvoidDupRef = new Set();
-	const inner = async function (configs) {
-		if (!Array.isArray(configs)) {
-			// 将Base64数据解码
-			configs = isBase64(configs) ? base64Decode(configs) : configs;
-			configs = configs.trim().split(/[\n,]+/);
-		}
+function generateClientConfigHtml(linksStr, uuid, host, onlyTls) {
+	const randomPath = `/${Math.random().toString(36).substring(2, 15)}?ed=2048`;
+	const urlTls = `?security=tls&fp=chrome&type=ws&sni=${host}&host=${host}&path=${encodeURIComponent(randomPath)}#`;
+	const urlHttp = `?security=none&fp=chrome&type=ws&host=${host}&path=${encodeURIComponent(randomPath)}#`;
 
-		return (await Promise.allSettled(configs.map(async str => {
-			// 前面是# 号的是忽略的配置
-			str = str.trim();
-			if (str.charAt(0) === '#') return;
+	const protoLinks = [
+		`${SEC.V_PRO}://${uuid}@${host}:443${urlTls}HttpsNode`
+	];
+	if (!onlyTls) protoLinks.push(`${SEC.V_PRO}://${uuid}@${host}:80${urlHttp}HttpNode`);
 
-			if (str.startsWith("https://") || str.startsWith("http://")) {
+	return `<!DOCTYPE html><html><head><title>Config Generator</title><style>body{background:#111;color:#eee;font-family:sans-serif;padding:2rem}pre{background:#222;padding:1rem;border-radius:8px;color:#0f0;overflow:auto}</style></head><body>
+		<h2>Gateway Configuration</h2>
+		<h3>Original Links</h3>
+		<pre>${protoLinks.join('\n')}</pre>
+		<h3>Edge links</h3>
+		<pre>${linksStr.join('\n')}</pre>
+	</body></html>`;
+}
+
+// ======================================
+// 10. 工具集 (Utilities & Streams)
+// ======================================
+function buildWsReadableStream(ws, earlyDataHead, log) {
+	return new ReadableStream({
+		start(ctrl) {
+			ws.addEventListener('message', e => ctrl.enqueue(e.data));
+			ws.addEventListener('close', () => { safeCloseSocket(ws); ctrl.close(); });
+			ws.addEventListener('error', e => ctrl.error(e));
+
+			if (earlyDataHead) {
 				try {
-					const res = await fetchApiWrapper(str, apiOutTime, apiAvoidDupRef);
-					// 回调处理文件有 http 的链接
-					return inner(res);
-				} catch (err) {
-					console.error('获取地址时出错: ' + str, err.message);
-					return; // 如果有错误，直接返回
-				}
+					const buf = Uint8Array.from(atob(earlyDataHead.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+					if (buf.length > 0) ctrl.enqueue(buf.buffer);
+				} catch (e) { ctrl.error(e); }
 			}
-			return str;
-		}))).flatMap(data => {
-			if (data.status == "fulfilled") {
-				return data.value;
-			}
-		}).filter(Boolean);
-	}
-
-	return inner(configs);
-}
-
-/**
- * Url fetch wrapper
- * @param {string} furl
- * @param {number} [outTime=0]
- * @param {Set} [apiAvoidDupRef=null]
- * @param {string} [ua="Mozilla/5.0 Chrome/131.0.0.0"]
- * @returns {Promise<string>} fetch text content
- */
-function fetchApiWrapper(furl, outTime = 0, apiAvoidDupRef = null, ua = "Mozilla/5.0 Chrome/131.0.0.0") {
-	const converSplit = furl.split("://");
-	if (converSplit.length < 2) {
-		furl = "https://" + converSplit[0];
-	}
-	// 避免的链接调用循环
-	if (apiAvoidDupRef) {
-		if (apiAvoidDupRef.has(furl)) {
-			throw new Error("URL duplicate request: " + furl);
-		}
-		apiAvoidDupRef.add(furl);
-	}
-
-	let abortc = null, id = null;
-	if (typeof outTime === "number" && outTime > 0) {
-		abortc = new AbortController();
-		id = setTimeout(() => abortc.abort(), outTime);
-	}
-	const prom = fetch(furl, {
-		method: 'get',
-		headers: {
-			'Accept': 'text/html,text/plain,application/xhtml+xml,text/yaml,application/json,application/x-yaml;',
-			'User-Agent': ua
 		},
-		signal: abortc?.signal,
-	}).then(resp => resp.text()).finally(() => {
-		id && clearTimeout(id);
-	}).catch(error => {
-		if (error.name === 'AbortError') {
-			throw new Error(`请求超时 ${outTime}ms: ${furl}`);
-		}
-		throw error;
+		cancel(reason) { log(`Stream canceled: ${reason}`); safeCloseSocket(ws); }
 	});
-
-	return prom;
 }
 
-function generateRandomStr(len) {
-	return Math.random().toString(36).substring(2, len);
+function resolveProxyIpConfig(url, proxyEnvStr) {
+	const reqIp = url.searchParams.get("proxyip") || url.searchParams.get("pyip");
+	const source = reqIp || proxyEnvStr || DEFAULT_PROXY_IPS.join(',');
+	const pool = source.split(/[,\s]+/).filter(a => !a.startsWith("#"));
+	const target = pool[Math.floor(Math.random() * pool.length)];
+
+	if (target.includes('[')) { // IPv6 parse
+		const match = target.match(/(\[[a-f0-9:]+\])(?::(\d+))?/i);
+		return match ? [match[1], match[2] || '443'] : [null, '443'];
+	}
+	const [ip, port = '443'] = target.split(':');
+	return [ip, port];
+}
+
+function parseSocks5Address(addr) {
+	const [right, left] = addr.split("@").reverse();
+	let username, password;
+	if (left) [username, password] = left.split(":");
+	const parts = right.split(":");
+	const port = Number(parts.pop());
+	return { username, password, hostname: parts.join(":"), port };
+}
+
+function formatUuidHex(arr) {
+	const byteToHex = Array.from({ length: 256 }, (_, i) => (i + 0x100).toString(16).slice(1));
+	return [
+		byteToHex[arr[0]], byteToHex[arr[1]], byteToHex[arr[2]], byteToHex[arr[3]], '-',
+		byteToHex[arr[4]], byteToHex[arr[5]], '-',
+		byteToHex[arr[6]], byteToHex[arr[7]], '-',
+		byteToHex[arr[8]], byteToHex[arr[9]], '-',
+		byteToHex[arr[10]], byteToHex[arr[11]], byteToHex[arr[12]], byteToHex[arr[13]], byteToHex[arr[14]], byteToHex[arr[15]]
+	].join('').toLowerCase();
+}
+
+
+async function fetchWithTimeout(url, timeoutMs = 8000, userAgent = "Mozilla/5.0") {
+	const fetchUrl = (url.startsWith("https://") || url.startsWith("http://")) ? url : "https://" + url;
+	const signal = AbortSignal.timeout(timeoutMs);
+	const response = await fetch(fetchUrl, {
+		headers: { 'User-Agent': userAgent, 'Accept': '*/*' },
+		signal
+	});
+	if (!response.ok) throw new Error(`HTTP ${response.status}`);
+	return response.text();
+}
+
+function isValidUUID(uuid) {
+	return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(uuid);
+}
+
+function safeCloseSocket(socket) {
+	try {
+		if (socket && (socket.readyState === WS_READY_STATE_OPEN || socket.readyState === WS_READY_STATE_CLOSING)) {
+			socket.close();
+		}
+	} catch (e) { /* ignore */ }
+}
+
+function render404Nginx() {
+	return new Response(`<html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>`, { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });
+}
+
+function renderFakeDriveView(ctx) {
+	const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${ctx.host} - Cloud Drive</title><style>body{font-family:sans-serif;margin:0;padding:20px;background:#f4f4f4}.container{max-width:600px;margin:auto;background:#fff;padding:2rem;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);text-align:center}.icon{font-size:4rem;color:#ccc}</style></head><body><div class="container"><div class="icon">☁️</div><h2>Personal Drive Server</h2><p>Server is running correctly. Authentication required for access.</p></div></body></html>`;
+	return new Response(html, { headers: { "content-type": "text/html;charset=utf-8" } });
+}
+
+function generateDomain() {
+	const vowels = "aeiou";
+	const consonants = "bcdfghjklmnpqrstvwxyz";
+	const tlds = [".com", ".net", ".org", ".io", ".ai", ".co", ".xyz", ".top", ".tech"];
+	// 生成一个“辅音 + 元音”音节
+	function syllable() {
+		const c = consonants[Math.floor(Math.random() * consonants.length)];
+		const v = vowels[Math.floor(Math.random() * vowels.length)];
+		return c + v;
+	}
+	// 生成一个由多个音节组成的域名部分
+	function word(minSyllables = 2, maxSyllables = 4) {
+		const count = Math.floor(Math.random() * (maxSyllables - minSyllables + 1)) + minSyllables;
+		let result = "";
+		for (let i = 0; i < count; i++) {
+			result += syllable();
+		}
+		return result;
+	}
+	const secondLevel = word(2, 4);
+	const tld = tlds[Math.floor(Math.random() * tlds.length)];
+	const isThirdLevel = Math.random() < 0.5;
+	if (isThirdLevel) {
+		const thirdLevel = word(1, 2);
+		return `${thirdLevel}.${secondLevel}${tld}`;
+	}
+
+	return `${secondLevel}${tld}`;
 }
 
 function base64Encode(str) {
