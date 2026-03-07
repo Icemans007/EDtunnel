@@ -520,7 +520,7 @@ async function parseTextProxyList(urlsStr) {
 
 async function parseCsvProxyList(csvUrlStr, onlyTls, dlsStr) {
 	if (!csvUrlStr?.trim()) return [];
-	const [DLS = 5, MAXROW = 8] = dlsStr.split(":").map(Number);
+	const [DLS = 5, MAXROW = 8] = String(dlsStr).split(":").map(Number);
 	const results = [];
 	const csvUrls = csvUrlStr.split(/[,\s]+/);
 
