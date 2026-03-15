@@ -170,10 +170,9 @@ async function handleWebSocketRouter(request, ctx) {
 
 			// 尚未建立，解析握手包
 			const parsedReq = decodeVProtocolHeader(chunk, ctx.userIDs);
+			if (parsedReq.hasError) throw new Error(parsedReq.message);
 			connInfo.address = parsedReq.addressRemote;
 			connInfo.portLog = `${parsedReq.portRemote}--${Math.random()} ${parsedReq.isUDP ? 'udp' : 'tcp'}`;
-
-			if (parsedReq.hasError) throw new Error(parsedReq.message);
 
 			if (parsedReq.isUDP) {
 				if (parsedReq.portRemote === 53) {
@@ -184,8 +183,7 @@ async function handleWebSocketRouter(request, ctx) {
 			}
 
 			const vResponseHeader = new Uint8Array([parsedReq.protocolVersion[0], 0]);
-			const u8Chunk = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
-			const rawClientData = u8Chunk.subarray(parsedReq.rawDataIndex);
+			const rawClientData = chunk.slice(parsedReq.rawDataIndex);
 
 			if (connInfo.isDns) return handleDNSQuery(rawClientData, webSocket, vResponseHeader, log);
 
@@ -193,7 +191,7 @@ async function handleWebSocketRouter(request, ctx) {
 		},
 		close: () => log(`WS readable closed`),
 		abort: (reason) => log(`WS readable aborted: ${reason}`),
-	})).catch(err => log(`WS pipeTo error: ${err}`));
+	})).catch(err => log(`WS pipeTo error, ${err}`));
 
 	return new Response(null, { status: 101, webSocket: client });
 }
@@ -290,13 +288,9 @@ async function bindRemoteToWs(remoteSocket, ws, vHeader, retryCallback, log) {
 function decodeVProtocolHeader(buffer, validUuids) {
 	if (buffer.byteLength < 24) return { hasError: true, message: 'invalid length' };
 
-	const dataView = new DataView(buffer instanceof Uint8Array ? buffer.buffer : buffer);
-
-	// 【优化点】：使用零拷贝视图处理底层 Buffer
-	const u8Buffer = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-
+	const dataView = new DataView(buffer);
 	const version = dataView.getUint8(0);
-	const slicedUuidHex = formatUuidHex(u8Buffer.subarray(1, 17)); // 零拷贝提取 UUID
+	const slicedUuidHex = formatUuidHex(new Uint8Array(buffer.slice(1, 17)));
 
 	const isValid = validUuids.some(u => u.trim() === slicedUuidHex);
 	if (!isValid) return { hasError: true, message: 'invalid uuid auth' };
@@ -314,12 +308,12 @@ function decodeVProtocolHeader(buffer, validUuids) {
 		case 1: // IPv4
 			addrLen = 4;
 			addrIndex = portIndex + 3;
-			addrValue = u8Buffer.subarray(addrIndex, addrIndex + addrLen).join('.'); // 零拷贝拼接
+			addrValue = new Uint8Array(buffer.slice(addrIndex, addrIndex + addrLen)).join('.');
 			break;
 		case 2: // Domain
 			addrLen = dataView.getUint8(portIndex + 3);
 			addrIndex = portIndex + 4;
-			addrValue = new TextDecoder().decode(u8Buffer.subarray(addrIndex, addrIndex + addrLen)); // 零拷贝解码
+			addrValue = new TextDecoder().decode(buffer.slice(addrIndex, addrIndex + addrLen));
 			break;
 		case 3: // IPv6
 			addrLen = 16;
@@ -419,7 +413,7 @@ async function handleDNSQuery(udpChunk, ws, vHeader, log) {
 				log(`dns server(${dnsHost}) tcp is close`);
 			},
 			abort(reason) {
-				console.error(`dns server(${dnsHost}) tcp is abort`, reason);
+				log(`dns server(${dnsHost}) tcp is abort and reason: ${reason}`);
 			}
 		}));
 	} catch (e) { log(`DNS error: ${e.message}`); }
@@ -771,7 +765,7 @@ function buildWsReadableStream(ws, earlyDataHead, log) {
 				} catch (e) { ctrl.error(e); }
 			}
 		},
-		cancel(reason) { log(`Stream canceled: ${reason}`); safeCloseSocket(ws); }
+		cancel(reason) { safeCloseSocket(ws); log(`Stream canceled: ${reason.message}`); }
 	});
 }
 
