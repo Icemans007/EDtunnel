@@ -51,7 +51,7 @@ on:
   #     - "run"
   #     - "index.js"
   #     - ".gitignore"
-  # repository_dispatch:
+  repository_dispatch:
 
 env:
   GIT_REF: ${{ github.event.inputs.commit || github.ref }}
@@ -112,7 +112,7 @@ jobs:
           environment: ${{ env.WORKERS_ENV }}
           vars: |
             UUID
-            PROXYIP
+            RELAYIP
             ADD
             SUB
             CSV
@@ -121,7 +121,7 @@ jobs:
             URL_FORWARD
         env:
           UUID: ${{ vars.UUID }}
-          PROXYIP: ${{ vars.PROXYIP }}
+          RELAYIP: ${{ vars.RELAYIP }}
           ADD: ${{ vars.ADD }}
           SUB: ${{ vars.SUB }}
           CSV: ${{ vars.CSV }}

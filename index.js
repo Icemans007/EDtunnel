@@ -6,19 +6,14 @@ import { connect } from 'cloudflare:sockets';
 // ======================================
 const SEC = {
 	V_PRO: base64Decode('dmxlc3M='),
-	C_META: base64Decode('Y2xhc2g='),
-	S_BOX: base64Decode('c2luZ2JveA=='),
-	V2_R: base64Decode('djJyYXk='),
-	X_R: base64Decode('eHJheQ=='),
-	SS: base64Decode('c3M='),
-	SR: base64Decode('c3Ny'),
+	S5_R: base64Decode('c3Ny'),
 	V_M: base64Decode('dm1lc3M=')
 };
 
 // ======================================
 // 2. 常量与默认配置 (Constants & Defaults)
 // ======================================
-const DEFAULT_PROXY_IPS = ['cdn.xn--b6gac.eu.org:443', 'cdn-all.xn--b6gac.eu.org:443'];
+const DEFAULT_RELAY_IPS = ['cdn.xn--b6gac.eu.org:443', 'cdn-all.xn--b6gac.eu.org:443'];
 const WS_READY_STATE_OPEN = 1;
 const WS_READY_STATE_CLOSING = 2;
 
@@ -56,14 +51,14 @@ function buildContext(request, env) {
 	const url = new URL(request.url);
 	const host = request.headers.get('Host') || url.hostname;
 	const userAgent = request.headers.get('User-Agent')?.toLowerCase() || '';
-	const { UUID, PROXYIP, SOCKS5, SOCKS5_RELAY, URL_FORWARD, ADD, SUB, CSV, DLSstr, ONLYTLS } = env;
+	const { UUID, RELAYIP, SOCKS5, SOCKS5_RELAY, URL_FORWARD, ADD, SUB, CSV, DLS, ONLYTLS } = env;
 
 	// 1. 用户 ID 解析
 	const userIDs = (UUID?.trim() || '').replace(/[\s,]+/g, ',').split(',').filter(Boolean);
 	const isInvalidUser = userIDs.some(uuid => !isValidUUID(uuid));
 
 	// 2. 代理 IP 解析 (优先请求参数，其次环境变量，最后回退默认)
-	const [proxyIp, proxyPort] = resolveProxyIpConfig(url, PROXYIP);
+	const [relayIp, relayPort] = resolveRelayIpConfig(url, RELAYIP);
 
 	// 3. SOCKS5 解析
 	let socks5Config = null;
@@ -82,7 +77,7 @@ function buildContext(request, env) {
 	const pathname = url.pathname.replace(/\/+$/, '') || '/';
 	const matchedUserId = userIDs.find(uuid => pathname.includes(uuid)) || '';
 
-	const hasSubscriptionParams = url.searchParams.has("cfproxylist") || url.searchParams.has("cfproxycsv") || url.searchParams.has("proxysub");
+	const hasSearchParams = url.searchParams.has("textProxy") || url.searchParams.has("csvProxy") || url.searchParams.has("subProvider");
 	const target = determineSubscriptionTarget(url, userAgent);
 
 	let onlyTls = ONLYTLS ?? true;
@@ -94,12 +89,12 @@ function buildContext(request, env) {
 		userIDs,
 		matchedUserId,
 		isInvalidUser,
-		proxyIp, proxyPort,
+		relayIp, relayPort,
 		socks5Config,
 		socks5Relay: !!SOCKS5_RELAY,
 		urlForward: URL_FORWARD,
 		onlyTls,
-		params: { ADD, SUB, CSV, DLSstr, target, hasSubscriptionParams }
+		params: { ADD, SUB, CSV, DLS, target, hasSearchParams }
 	};
 }
 
@@ -110,15 +105,8 @@ async function handleHttpRouter(request, ctx) {
 	const { pathname, matchedUserId } = ctx;
 
 	if (pathname === '/') {
-		if (ctx.urlForward) return proxyForward(ctx, request);
+		if (ctx.urlForward) return urlForward(ctx, request);
 		return renderFakeDriveView(ctx); // 伪装页
-	}
-
-	if (pathname === '/cfrequest') {
-		return new Response(JSON.stringify(request.cf, null, 4), {
-			status: 200,
-			headers: { "Content-Type": "application/json;charset=utf-8" },
-		});
 	}
 
 	// 匹配到隐藏的 UUID 路径，生成订阅和配置
@@ -126,15 +114,31 @@ async function handleHttpRouter(request, ctx) {
 		return await generateSubscription(ctx);
 	}
 
-	if (ctx.urlForward) return proxyForward(ctx, request);
+	if (ctx.urlForward) return urlForward(ctx, request);
 	return render404Nginx();
 }
 
-function proxyForward(ctx, request) {
-	const targetUrl = new URL(ctx.urlForward + ctx.url.pathname + ctx.url.search);
-	const headers = new Headers([...request.headers].filter(([key]) => !key.toLowerCase().startsWith('cf-')));
-	headers.set('Host', targetUrl.hostname);
-	return fetch(targetUrl, { method: request.method, headers, body: request.body, redirect: 'follow' });
+async function urlForward(ctx, request) {
+	const url = new URL(request.url);
+	url.host = new URL(ctx.urlForward).host;
+	const resp = await fetch(new Request(url, {
+		method: request.method,
+		body: request.body,
+		redirect: 'manual',
+		headers: {
+			...Object.fromEntries(request.headers), // 继承原请求头
+			'host': url.host,                   // 覆盖 Host
+			'origin': url.origin,
+			'referer': url.origin    // 伪装来源
+		}
+	}));
+	const newResHeaders = new Headers(resp.headers);
+	newResHeaders.set('Access-Control-Allow-Origin', '*');
+	newResHeaders.set('Access-Control-Allow-Headers', '*');
+	return new Response(resp.body, {
+		status: resp.status,
+		headers: newResHeaders
+	});
 }
 
 // ======================================
@@ -179,9 +183,9 @@ async function handleWebSocketRouter(request, ctx) {
 				throw new Error('UDP proxy is only enabled for DNS (port 53)');
 			}
 
-			// V-Protocol 回包头: ["version", "附加信息长度"]
 			const vResponseHeader = new Uint8Array([parsedReq.protocolVersion[0], 0]);
-			const rawClientData = chunk.slice(parsedReq.rawDataIndex);
+			const u8Chunk = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+			const rawClientData = u8Chunk.subarray(parsedReq.rawDataIndex);
 
 			if (connInfo.isDns) return handleDNSQuery(rawClientData, webSocket, vResponseHeader, log);
 
@@ -221,13 +225,12 @@ async function establishOutboundTCP(remoteSocketObj, parsedReq, rawData, ws, vHe
 	async function retryFallback() {
 		let tcpSocket;
 		try {
-			// 严格区分 SOCKS5 和 proxyIP 的 Fallback 路由
 			if (ctx.socks5Config) {
 				// 如果有 SOCKS，走 SOCKS 去真实目标地址
 				tcpSocket = await doConnect(addressRemote, portRemote, true);
 			} else {
-				// 否则 fallback 到 CF 优选 IP (proxyIp)
-				tcpSocket = await doConnect(ctx.proxyIp || addressRemote, ctx.proxyPort || portRemote, false);
+				// 否则 fallback relayIp
+				tcpSocket = await doConnect(ctx.relayIp || addressRemote, ctx.relayPort || portRemote, false);
 			}
 
 			// 增加底层 Socket 关闭事件的兜底拦截，防止假死
@@ -287,9 +290,13 @@ async function bindRemoteToWs(remoteSocket, ws, vHeader, retryCallback, log) {
 function decodeVProtocolHeader(buffer, validUuids) {
 	if (buffer.byteLength < 24) return { hasError: true, message: 'invalid length' };
 
-	const dataView = new DataView(buffer);
+	const dataView = new DataView(buffer instanceof Uint8Array ? buffer.buffer : buffer);
+
+	// 【优化点】：使用零拷贝视图处理底层 Buffer
+	const u8Buffer = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+
 	const version = dataView.getUint8(0);
-	const slicedUuidHex = formatUuidHex(new Uint8Array(buffer.slice(1, 17)));
+	const slicedUuidHex = formatUuidHex(u8Buffer.subarray(1, 17)); // 零拷贝提取 UUID
 
 	const isValid = validUuids.some(u => u.trim() === slicedUuidHex);
 	if (!isValid) return { hasError: true, message: 'invalid uuid auth' };
@@ -307,12 +314,12 @@ function decodeVProtocolHeader(buffer, validUuids) {
 		case 1: // IPv4
 			addrLen = 4;
 			addrIndex = portIndex + 3;
-			addrValue = new Uint8Array(buffer.slice(addrIndex, addrIndex + addrLen)).join('.');
+			addrValue = u8Buffer.subarray(addrIndex, addrIndex + addrLen).join('.'); // 零拷贝拼接
 			break;
 		case 2: // Domain
 			addrLen = dataView.getUint8(portIndex + 3);
 			addrIndex = portIndex + 4;
-			addrValue = new TextDecoder().decode(buffer.slice(addrIndex, addrIndex + addrLen));
+			addrValue = new TextDecoder().decode(u8Buffer.subarray(addrIndex, addrIndex + addrLen)); // 零拷贝解码
 			break;
 		case 3: // IPv6
 			addrLen = 16;
@@ -430,32 +437,29 @@ function determineSubscriptionTarget(url, userAgent) {
 	if (url.searchParams.get('target')) return url.searchParams.get('target').toLowerCase();
 	if (url.searchParams.has('sub')) return "sub";
 	if (url.searchParams.has('raw')) return "raw";
-	if (url.searchParams.has('clash') || userAgent.includes('clash') || userAgent.includes('meta')) return "clash";
-	if (url.searchParams.has('sb') || url.searchParams.has('singbox') || url.searchParams.has('sing-box') || userAgent.includes('singbox') || userAgent.includes('sing-box')) return "singbox";
+	// if (url.searchParams.has('clash') || userAgent.includes('clash') || userAgent.includes('meta')) return "clash";
+	// if (url.searchParams.has('sb') || url.searchParams.has('singbox') || url.searchParams.has('sing-box') || userAgent.includes('singbox') || userAgent.includes('sing-box')) return "singbox";
 	return "";
 }
 
 async function fetchExternalProxies(ctx) {
-	const { env, url, matchedUserId, host, onlyTls, params: { DLSstr, hasSubscriptionParams } } = ctx;
+	const { env, url, matchedUserId, host, onlyTls, params: { DLS, hasSearchParams } } = ctx;
 	const results = [];
-	const dlsStr = url.searchParams.get("DLSstr") || DLSstr || 5;
+	const dlsStr = url.searchParams.get("DLS") || DLS || 5;
 	const [textListStr, csvListStr, subProviderStr] = [
-		hasSubscriptionParams ? url.searchParams.get("cfproxylist") : env.ADD,
-		hasSubscriptionParams ? url.searchParams.get("cfproxycsv") : env.CSV,
-		hasSubscriptionParams ? url.searchParams.get("proxysub") : env.SUB
+		hasSearchParams ? [url.searchParams.get("textProxy") && "api://" + url.searchParams.get("textProxy"), ","] : [env.ADD, "\n"],
+		hasSearchParams ? [url.searchParams.get("csvProxy") && "api://" + url.searchParams.get("csvProxy"), ","] : [env.CSV, "\n"],
+		hasSearchParams ? [url.searchParams.get("subProvider") && "api://" + url.searchParams.get("subProvider"), ","] : [env.SUB, "\n"]
 	];
 
-	if (textListStr) {
-		const urls = textListStr.trim().split(/[,\s]+/).map(l => {
-			return (l.startsWith("https://") || l.startsWith("http://")) ? l : "https://" + l;
-		}).join(',');
-		results.push(...await parseTextProxyList(urls));
+	if (textListStr[0]) {
+		results.push(...await parseTextProxyList(textListStr[0], textListStr[1]));
 	}
-	if (csvListStr) {
-		results.push(...await parseCsvProxyList(csvListStr, onlyTls, dlsStr));
+	if (csvListStr[0]) {
+		results.push(...await parseCsvProxyList(csvListStr[0], onlyTls, dlsStr, csvListStr[1]));
 	}
-	if (subProviderStr) {
-		results.push(...await parseSubProviderLinks(subProviderStr, matchedUserId, host));
+	if (subProviderStr[0]) {
+		results.push(...await parseSubProviderLinks(subProviderStr[0], matchedUserId, host, subProviderStr[1]));
 	}
 
 	return results;
@@ -475,8 +479,18 @@ function formatSubscriptionResponse(addresses, ctx) {
 		// 如果新链接Tag中有测速数据的Tag比没有的好，数据大的更好
 		if (!(!existing || !eSpeed && pSpeed || eSpeed && pSpeed && pSpeed[0] > eSpeed[0])) continue;
 
-		const tlsQuery = onlyTls ? "&security=tls" : "";
-		let link = fullLink || `${scheme}://${matchedUserId}@${addr}:${port}?type=ws${tlsQuery}&host=${host}&sni=${host}&path=${encodeURIComponent("/?ed=2048")}#${encodeURIComponent(rawTag)}`;
+		let link = fullLink || (() => {
+			const urlLink = new URL(`${scheme}://${addr}`);
+			urlLink.username = matchedUserId;
+			urlLink.hash = rawTag;
+			urlLink.port = port;
+			urlLink.searchParams.set(base64Decode('dHlwZQ=='), "ws");
+			urlLink.searchParams.set(base64Decode('aG9zdA=='), host);
+			urlLink.searchParams.set(base64Decode('c2VjdXJpdHk='), onlyTls ? "tls" : "none");
+			urlLink.searchParams.set(base64Decode('c25p'), host);
+			urlLink.searchParams.set(base64Decode('cGF0aA=='), base64Decode('Lz9lZD0yMDQ4'));
+			return urlLink.toString();
+		})();
 
 		// Handle duplicate tags
 		let count = uniqueTags.get(rawTag) || 0;
@@ -505,9 +519,10 @@ function formatSubscriptionResponse(addresses, ctx) {
 	});
 }
 
-async function parseTextProxyList(urlsStr) {
+async function parseTextProxyList(urlsStr, separator) {
 	if (!urlsStr?.trim()) return [];
-	const rawTextLines = await fetchUrlsToLines(urlsStr, 8000);
+	const visitedUrls = new Set();	// 防止fetch自循环
+	const rawTextLines = await fetchUrlsToLines(urlsStr, separator, visitedUrls);
 	const regExp = /^((?:[\w-]+\.)+[a-z-]+|\d{1,3}(?:\.\d{1,3}){3}|\[[a-f0-9:]+\])(?::(\d+))?(?:#(.+)$)?/i;
 
 	return rawTextLines.map(line => {
@@ -518,11 +533,11 @@ async function parseTextProxyList(urlsStr) {
 	}).filter(Boolean);
 }
 
-async function parseCsvProxyList(csvUrlStr, onlyTls, dlsStr) {
+async function parseCsvProxyList(csvUrlStr, onlyTls, dlsStr, separator) {
 	if (!csvUrlStr?.trim()) return [];
+	const csvUrls = await fetchUrlsToLines(csvUrlStr, separator);
 	const [DLS = 5, MAXROW = 8] = String(dlsStr).split(":").map(Number);
 	const results = [];
-	const csvUrls = csvUrlStr.split(/[,\s]+/);
 
 	const handleHeader = (line) => {
 		const header = line.toLowerCase().split(',').map(t => t.trim());
@@ -600,9 +615,10 @@ async function parseCsvProxyList(csvUrlStr, onlyTls, dlsStr) {
 	return results;
 }
 
-async function parseSubProviderLinks(subUrlStr, userID, host) {
+async function parseSubProviderLinks(subUrlStr, userID, host, separator) {
 	if (!subUrlStr?.trim()) return [];
-	const subUrls = subUrlStr.trim().split(/[\n,]+/);
+	const visitedUrls = new Set();	// 防止fetch自循环
+	const subUrls = await fetchUrlsToLines(subUrlStr, separator, visitedUrls);
 	const results = [];
 
 	// 向第三方订阅生成器请求前，需要将自身的CF节点的UUID和节点地址使用假数据掩盖
@@ -610,43 +626,52 @@ async function parseSubProviderLinks(subUrlStr, userID, host) {
 	const fakeHost = generateDomain();
 
 	for (let sub of subUrls) {
-		if (sub.trim().startsWith("#")) continue;
-
-		const fetchUrl = `${sub}/sub?host=${fakeHost}&uuid=${fakeUserID}&path=${encodeURIComponent("/?ed=2048")}`;
+		if (!sub.startsWith('http')) sub = "https://" + sub
 		try {
-			let data = await fetchWithTimeout(fetchUrl, 12000, 'v2rayn.xray');
+			const fetchUrl = new URL(`${sub}`);
+			if (fetchUrl.pathname == '/') fetchUrl.pathname = "/sub";
+			fetchUrl.searchParams.set("host", fakeHost);
+			fetchUrl.searchParams.set("uuid", fakeUserID);
+			fetchUrl.searchParams.set("path", base64Decode('Lz9lZD0yMDQ4'));
+
+			let data = await fetchWithTimeout(fetchUrl.toString(), 12000, 'v2rayn.xray');
 			if (isBase64(data)) data = base64Decode(data);
 			data = data.replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host);
 			results.push(...data.split('\n').filter(Boolean));
 		} catch (e) {
-			console.error(`Sub Provider Fetch Error:`, e.message);
+			console.error(`Sub Provider Fetch Error for ${sub}:`, e.message);
 		}
 	}
 	return extractStandardProxyLinks(results);
 }
 
 // Resolves a list of nested API URLs into a flat array of lines
-async function fetchUrlsToLines(configsStr, timeoutMs = 8000) {
-	const configs = configsStr.trim().split(/[\n,]+/);
+async function fetchUrlsToLines(configsStr, separator = ",", visitedUrlsSet, timeoutMs = 8000, _abortFetch = false) {
+	const configs = configsStr.trim().split(new RegExp(`[${separator}]+`));
 	const results = [];
-
 	for (let line of configs) {
 		line = line.trim();
 		if (!line || line.startsWith('#')) continue;
-
 		let fetchUrl = "";
-		if (line.startsWith("https://") || line.startsWith("http://")) fetchUrl = line;
+		if (line.startsWith("api://")) fetchUrl = line.slice(6).trim();
 		else {
 			results.push(line);
 			continue;
 		}
-
+		if (_abortFetch) continue;
+		// 如果将 visitedUrlsSet 设置为 Set，说明是递归 fetch
+		const recursive = visitedUrlsSet instanceof Set;
+		if (recursive) {
+			const visted = visitedUrlsSet.has(fetchUrl);
+			if (visted) continue;
+			visitedUrlsSet.add(fetchUrl);
+		}
 		try {
 			const data = await fetchWithTimeout(fetchUrl, timeoutMs);
-			const nestedLines = await fetchUrlsToLines(data, timeoutMs);
-			results.push(...nestedLines);
+			const innerlists = await fetchUrlsToLines(data, separator, recursive && visitedUrlsSet, timeoutMs, !recursive);
+			results.push(...innerlists);
 		} catch (e) {
-			console.error(`Fetch API list error: ${line}`);
+			console.error(`Fetch API list error: ${fetchUrl}`, e.message);
 		}
 	}
 	return results;
@@ -655,7 +680,6 @@ async function fetchUrlsToLines(configsStr, timeoutMs = 8000) {
 function extractStandardProxyLinks(linkLines) {
 	const regExp = /^(\w+):\/\/(?:[^@\s]+@)?([^?#\s\/]+)[^#\s]*(?:#(.*))?$/;
 	const results = [];
-
 	for (const line of linkLines) {
 		const match = regExp.exec(line.trim());
 		if (!match) continue;
@@ -663,7 +687,7 @@ function extractStandardProxyLinks(linkLines) {
 		let host, port, tag;
 
 		try {
-			if (scheme === SEC.SR) continue;
+			if (scheme === SEC.S5_R) continue;
 			if (scheme === SEC.V_M) {
 				const parsed = JSON.parse(base64Decode(authHost));
 				host = parsed.add;
@@ -677,6 +701,7 @@ function extractStandardProxyLinks(linkLines) {
 			}
 			results.push([scheme, host, port, tag, line]);
 		} catch (e) {
+			console.warn('Extract proxy parse error', line, e.message);
 			continue; // Skip invalid lines safely
 		}
 	}
@@ -684,24 +709,49 @@ function extractStandardProxyLinks(linkLines) {
 }
 
 function generateClientConfigHtml(linksStr, uuid, host, onlyTls) {
-	const randomPath = `/${Math.random().toString(36).substring(2, 15)}?ed=2048`;
-	const urlTls = `?security=tls&fp=chrome&type=ws&sni=${host}&host=${host}&path=${encodeURIComponent(randomPath)}#`;
-	const urlHttp = `?security=none&fp=chrome&type=ws&host=${host}&path=${encodeURIComponent(randomPath)}#`;
-	const sublink = `https://${host}/${uuid}?sub`;
+	const randomPath = `/${Math.random().toString(36).substring(2, 15)}${base64Decode('P2VkPTIwNDg=')}`;
+
+	const urlHttp = new URL(`${SEC.V_PRO}://${host}`);
+	urlHttp.username = uuid;
+	urlHttp.hash = "HttpNode";
+	urlHttp.port = "80";
+	urlHttp.searchParams.set(base64Decode('dHlwZQ=='), "ws");
+	urlHttp.searchParams.set(base64Decode('aG9zdA=='), host);
+	urlHttp.searchParams.set(base64Decode('c2VjdXJpdHk='), "none");
+	urlHttp.searchParams.set(base64Decode('c25p'), host);
+	urlHttp.searchParams.set(base64Decode('ZnA='), "chrome");
+	urlHttp.searchParams.set(base64Decode('cGF0aA=='), randomPath);
+
+	const tlsHttp = new URL(urlHttp);
+	urlHttp.hash = "HttpsNode";
+	tlsHttp.port = "443";
+	tlsHttp.searchParams.set(base64Decode('c2VjdXJpdHk='), "tls");
+	tlsHttp.searchParams.set(base64Decode('c25p'), host);
+	urlHttp.searchParams.delete(base64Decode('c25p'));
+
 	const protoLinks = [
-		`${SEC.V_PRO}://${uuid}@${host}:443${urlTls}HttpsNode`
+		base64Encode(tlsHttp.toString())
 	];
-	if (!onlyTls) protoLinks.push(`${SEC.V_PRO}://${uuid}@${host}:80${urlHttp}HttpNode`);
+	if (!onlyTls) protoLinks.push(base64Encode(urlHttp.toString()));
 
 	return `<!DOCTYPE html><html><head><title>Config Generator</title><style>body{background:#111;color:#eee;font-family:sans-serif;padding:2rem}pre{background:#222;padding:1rem;border-radius:8px;color:#0f0;overflow:auto}</style></head><body>
 		<h2>Gateway Configuration</h2>
-		<h3>Subscription Link</h3>
-		<pre>${sublink}</pre>
+		<h3>Sub Link</h3>
+		<pre>https://${host}/${uuid}?sub</pre>
 		<h3>Original Links</h3>
 		<pre>${protoLinks.join('\n')}</pre>
 		<h3>Edge links</h3>
-		<pre>${linksStr}</pre>
+		<pre>${base64Encode(linksStr)}</pre>
 	</body></html>`;
+}
+
+function render404Nginx() {
+	return new Response(`<html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>`, { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });
+}
+
+function renderFakeDriveView(ctx) {
+	const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${ctx.host} - Cloud Drive</title><style>body{font-family:sans-serif;margin:0;padding:20px;background:#f4f4f4}.container{max-width:600px;margin:auto;background:#fff;padding:2rem;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);text-align:center}.icon{font-size:4rem;color:#ccc}</style></head><body><div class="container"><div class="icon">☁️</div><h2>Personal Drive Server</h2><p>Server is running correctly. Authentication required for access.</p></div></body></html>`;
+	return new Response(html, { headers: { "content-type": "text/html;charset=utf-8" } });
 }
 
 // ======================================
@@ -712,7 +762,7 @@ function buildWsReadableStream(ws, earlyDataHead, log) {
 		start(ctrl) {
 			ws.addEventListener('message', e => ctrl.enqueue(e.data));
 			ws.addEventListener('close', () => { safeCloseSocket(ws); ctrl.close(); });
-			ws.addEventListener('error', e => ctrl.error(e));
+			ws.addEventListener('error', e => { ctrl.error(e); log('WS stream has error');});
 
 			if (earlyDataHead) {
 				try {
@@ -725,9 +775,9 @@ function buildWsReadableStream(ws, earlyDataHead, log) {
 	});
 }
 
-function resolveProxyIpConfig(url, proxyEnvStr) {
-	const reqIp = url.searchParams.get("proxyip") || url.searchParams.get("pyip");
-	const source = reqIp || proxyEnvStr || DEFAULT_PROXY_IPS.join(',');
+function resolveRelayIpConfig(url, relayEnvStr) {
+	const reqIp = url.searchParams.get(base64Decode('cHJveHlpcA==')) || url.searchParams.get(base64Decode('cHlpcA=='));
+	const source = reqIp || relayEnvStr || DEFAULT_RELAY_IPS.join(',');
 	const pool = source.split(/[,\s]+/).filter(a => !a.startsWith("#"));
 	const target = pool[Math.floor(Math.random() * pool.length)];
 
@@ -759,7 +809,6 @@ function formatUuidHex(arr) {
 	].join('').toLowerCase();
 }
 
-
 async function fetchWithTimeout(url, timeoutMs = 8000, userAgent = "Mozilla/5.0") {
 	const fetchUrl = (url.startsWith("https://") || url.startsWith("http://")) ? url : "https://" + url;
 	const signal = AbortSignal.timeout(timeoutMs);
@@ -783,15 +832,6 @@ function safeCloseSocket(socket) {
 	} catch (e) { /* ignore */ }
 }
 
-function render404Nginx() {
-	return new Response(`<html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>`, { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });
-}
-
-function renderFakeDriveView(ctx) {
-	const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${ctx.host} - Cloud Drive</title><style>body{font-family:sans-serif;margin:0;padding:20px;background:#f4f4f4}.container{max-width:600px;margin:auto;background:#fff;padding:2rem;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);text-align:center}.icon{font-size:4rem;color:#ccc}</style></head><body><div class="container"><div class="icon">☁️</div><h2>Personal Drive Server</h2><p>Server is running correctly. Authentication required for access.</p></div></body></html>`;
-	return new Response(html, { headers: { "content-type": "text/html;charset=utf-8" } });
-}
-
 function generateDomain() {
 	const vowels = "aeiou";
 	const consonants = "bcdfghjklmnpqrstvwxyz";
@@ -811,15 +851,10 @@ function generateDomain() {
 		}
 		return result;
 	}
-	const secondLevel = word(2, 4);
 	const tld = tlds[Math.floor(Math.random() * tlds.length)];
-	const isThirdLevel = Math.random() < 0.5;
-	if (isThirdLevel) {
-		const thirdLevel = word(1, 2);
-		return `${thirdLevel}.${secondLevel}${tld}`;
-	}
-
-	return `${secondLevel}${tld}`;
+	const secondLevel = word(2, 4);
+	const thirdLevel = word(1, 2);
+	return `${thirdLevel}.${secondLevel}${tld}`;
 }
 
 function base64Encode(str) {
