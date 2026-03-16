@@ -41,20 +41,16 @@ jobs:
         run: npm install -g javascript-obfuscator
 
       - name: Obfuscate code
-        run: |
-          javascript-obfuscator index.js --output _worker.js \
-          --compact true \
-          --control-flow-flattening true \
-          --control-flow-flattening-threshold 1 \
-          --dead-code-injection true \
-          --dead-code-injection-threshold 1 \
-          --identifier-names-generator hexadecimal \
-          --rename-globals true \
-          --string-array true \
-          --string-array-encoding base64 \
-          --string-array-threshold 1 \
-          --transform-object-keys true \
-          --unicode-escape-sequence true
+        run: >
+          javascript-obfuscator index.js --output _worker.js
+          --compact true
+          --simplify true
+          --split-strings true
+          --split-strings-chunk-length 7
+          --identifier-names-generator mangled-shuffled
+          --rename-globals true
+          --transform-object-keys true
+          --seed 1
 
       - name: Commit changes
         run: |

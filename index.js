@@ -26,7 +26,7 @@ export default {
 			const appCtx = buildContext(request, env);
 
 			if (appCtx.isInvalidUser) {
-				throw new Error('UID configuration is invalid');
+				throw new Error('UUID configuration is invalid');
 			}
 
 			// 路由分发 (Routing Dispatch)
@@ -51,11 +51,11 @@ function buildContext(request, env) {
 	const url = new URL(request.url);
 	const host = request.headers.get('Host') || url.hostname;
 	const userAgent = request.headers.get('User-Agent')?.toLowerCase() || '';
-	const { UID, RELAYIP, SOCKS5, SOCKS5_RELAY, URL_FORWARD, ADD, SUB, CSV, DLS, ONLYTLS } = env;
+	const { UUID, RELAYIP, SOCKS5, SOCKS5_RELAY, URL_FORWARD, ADD, SUB, CSV, DLS, ONLYTLS } = env;
 
 	// 1. 用户 ID 解析
-	const userIDs = (UID?.trim() || '').replace(/[\s,]+/g, ',').split(',').filter(Boolean);
-	const isInvalidUser = userIDs.some(uid => !isValidUUID(uid));
+	const userIDs = (UUID?.trim() || '').replace(/[\s,]+/g, ',').split(',').filter(Boolean);
+	const isInvalidUser = userIDs.some(uuid => !isValidUUID(uuid));
 
 	// 2. 代理 IP 解析 (优先请求参数，其次环境变量，最后回退默认)
 	const [relayIp, relayPort] = resolveRelayIpConfig(url, RELAYIP);
@@ -75,7 +75,7 @@ function buildContext(request, env) {
 
 	// 4. 其他配置与特征
 	const pathname = url.pathname.replace(/\/+$/, '') || '/';
-	const matchedUserId = userIDs.find(uid => pathname.includes(uid)) || '';
+	const matchedUserId = userIDs.find(uuid => pathname.includes(uuid)) || '';
 
 	const hasSearchParams = url.searchParams.has("textProxy") || url.searchParams.has("csvProxy") || url.searchParams.has("subProvider");
 	const target = determineSubscriptionTarget(url, userAgent);
@@ -190,7 +190,7 @@ async function handleWebSocketRouter(request, ctx) {
 			await establishOutboundTCP(remoteSocketObj, parsedReq, rawClientData, webSocket, vResponseHeader, ctx, log);
 		},
 		close: () => log(`WS readable closed`),
-		abort: (reason) => log(`WS readable aborted: ${reason}`),
+		abort: (reason) => log(`WS readable aborted, ${reason}`),
 	})).catch(err => log(`WS pipeTo error, ${err}`));
 
 	return new Response(null, { status: 101, webSocket: client });
@@ -413,7 +413,7 @@ async function handleDNSQuery(udpChunk, ws, vHeader, log) {
 				log(`dns server(${dnsHost}) tcp is close`);
 			},
 			abort(reason) {
-				log(`dns server(${dnsHost}) tcp is abort and reason: ${reason}`);
+				log(`dns server(${dnsHost}) tcp is abort and reason, ${reason}`);
 			}
 		}));
 	} catch (e) { log(`DNS error: ${e.message}`); }
@@ -497,15 +497,15 @@ function formatSubscriptionResponse(addresses, ctx) {
 	const finalLinksStr = Array.from(uniqueAddrs.values()).map(m => m[1]).join('\n');
 
 	// const needsConverter = target && target !== 'raw' && target !== 'sub';
-	// const toDashboard = !target && userAgent.includes('mozilla');
+	const toDashboard = !target && userAgent.includes('mozilla');
 	// if (needsConverter) {
 	// }
 
-	// if (toDashboard) {
-	// 	return new Response(generateClientConfigHtml(finalLinksStr, matchedUserId, host, onlyTls), {
-	// 		headers: { "Content-Type": "text/html; charset=utf-8" },
-	// 	});
-	// }
+	if (toDashboard) {
+		return new Response(generateClientConfigHtml(finalLinksStr, matchedUserId, host, onlyTls), {
+			headers: { "Content-Type": "text/html; charset=utf-8" },
+		});
+	}
 
 	return new Response(target === 'raw' ? finalLinksStr : base64Encode(finalLinksStr), {
 		status: 200,
@@ -702,42 +702,42 @@ function extractStandardProxyLinks(linkLines) {
 	return results;
 }
 
-// function generateClientConfigHtml(linksStr, uuid, host, onlyTls) {
-// 	const randomPath = `/${Math.random().toString(36).substring(2, 15)}${base64Decode('P2VkPTIwNDg=')}`;
+function generateClientConfigHtml(linksStr, uuid, host, onlyTls) {
+	const randomPath = `/${Math.random().toString(36).substring(2, 15)}${base64Decode('P2VkPTIwNDg=')}`;
 
-// 	const urlHttp = new URL(`${SEC.V_PRO}://${host}`);
-// 	urlHttp.username = uuid;
-// 	urlHttp.hash = "HttpNode";
-// 	urlHttp.port = "80";
-// 	urlHttp.searchParams.set(base64Decode('dHlwZQ=='), "ws");
-// 	urlHttp.searchParams.set(base64Decode('aG9zdA=='), host);
-// 	urlHttp.searchParams.set(base64Decode('c2VjdXJpdHk='), "none");
-// 	urlHttp.searchParams.set(base64Decode('c25p'), host);
-// 	urlHttp.searchParams.set(base64Decode('ZnA='), "chrome");
-// 	urlHttp.searchParams.set(base64Decode('cGF0aA=='), randomPath);
+	const urlHttp = new URL(`${SEC.V_PRO}://${host}`);
+	urlHttp.username = uuid;
+	urlHttp.hash = "HttpNode";
+	urlHttp.port = "80";
+	urlHttp.searchParams.set(base64Decode('dHlwZQ=='), "ws");
+	urlHttp.searchParams.set(base64Decode('aG9zdA=='), host);
+	urlHttp.searchParams.set(base64Decode('c2VjdXJpdHk='), "none");
+	urlHttp.searchParams.set(base64Decode('c25p'), host);
+	urlHttp.searchParams.set(base64Decode('ZnA='), "chrome");
+	urlHttp.searchParams.set(base64Decode('cGF0aA=='), randomPath);
 
-// 	const tlsHttp = new URL(urlHttp);
-// 	urlHttp.hash = "HttpsNode";
-// 	tlsHttp.port = "443";
-// 	tlsHttp.searchParams.set(base64Decode('c2VjdXJpdHk='), "tls");
-// 	tlsHttp.searchParams.set(base64Decode('c25p'), host);
-// 	urlHttp.searchParams.delete(base64Decode('c25p'));
+	const tlsHttp = new URL(urlHttp);
+	urlHttp.hash = "HttpsNode";
+	tlsHttp.port = "443";
+	tlsHttp.searchParams.set(base64Decode('c2VjdXJpdHk='), "tls");
+	tlsHttp.searchParams.set(base64Decode('c25p'), host);
+	urlHttp.searchParams.delete(base64Decode('c25p'));
 
-// 	const protoLinks = [
-// 		base64Encode(tlsHttp.toString())
-// 	];
-// 	if (!onlyTls) protoLinks.push(base64Encode(urlHttp.toString()));
+	const protoLinks = [
+		tlsHttp.toString()
+	];
+	if (!onlyTls) protoLinks.push(urlHttp.toString());
 
-// 	return `<!DOCTYPE html><html><head><title>Config Generator</title><style>body{background:#111;color:#eee;font-family:sans-serif;padding:2rem}pre{background:#222;padding:1rem;border-radius:8px;color:#0f0;overflow:auto}</style></head><body>
-// 		<h2>Gateway Configuration</h2>
-// 		<h3>Sub Link</h3>
-// 		<pre>https://${host}/${uuid}?sub</pre>
-// 		<h3>Original Links</h3>
-// 		<pre>${protoLinks.join('\n')}</pre>
-// 		<h3>Edge links</h3>
-// 		<pre>${base64Encode(linksStr)}</pre>
-// 	</body></html>`;
-// }
+	return `<!DOCTYPE html><html><head><title>Config Generator</title><style>body{background:#111;color:#eee;font-family:sans-serif;padding:2rem}pre{background:#222;padding:1rem;border-radius:8px;color:#0f0;overflow:auto}</style></head><body>
+		<h2>Gateway Configuration</h2>
+		<h3>Sub Link</h3>
+		<pre>https://${host}/${uuid}?sub</pre>
+		<h3>Original Links</h3>
+		<pre>${protoLinks.join('\n')}</pre>
+		<h3>Edge links</h3>
+		<pre>${linksStr}</pre>
+	</body></html>`;
+}
 
 function render404Nginx() {
 	return new Response(`<html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>`, { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });

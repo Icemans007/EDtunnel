@@ -1,6 +1,6 @@
 name = "cf-worker-ws-dev"
 main = "_worker.js"
-compatibility_date = "2023-05-26"
+compatibility_date = "2026-03-16"
 # node_compat = true
 workers_dev = true
 
@@ -12,4 +12,4 @@ workers_dev = true
 
 # wrangler.toml (wrangler v3.88.0^)
 [observability.logs]
-enabled = true
+enabled = false
