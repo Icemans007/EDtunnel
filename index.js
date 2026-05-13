@@ -172,7 +172,7 @@ async function handleWebSocketRouter(request, ctx) {
 			const parsedReq = decodeVProtocolHeader(chunk, ctx.userIDs);
 			if (parsedReq.hasError) throw new Error(parsedReq.message);
 			connInfo.address = parsedReq.addressRemote;
-			connInfo.portLog = `${parsedReq.portRemote}--${Math.random()} ${parsedReq.isUDP ? 'udp' : 'tcp'}`;
+			connInfo.portLog = `${parsedReq.portRemote},${parsedReq.isUDP ? 'udp' : 'tcp'}--${Math.random()}`;
 
 			if (parsedReq.isUDP) {
 				if (parsedReq.portRemote === 53) {
@@ -212,7 +212,7 @@ async function establishOutboundTCP(remoteSocketObj, parsedReq, rawData, ws, vHe
 		if (!tcpSocket) throw new Error('Failed to connect to outbound');
 
 		remoteSocketObj.value = tcpSocket;
-		log(`connected to ${address}:${port}`);
+		log(`Connected to ${address}:${port}`);
 		const writer = tcpSocket.writable.getWriter();
 		await writer.write(rawData); // 写入 Client Hello
 		writer.releaseLock();
@@ -286,18 +286,18 @@ async function bindRemoteToWs(remoteSocket, ws, vHeader, retryCallback, log) {
 // 7. 协议解析引擎 (Protocol Decoding Layer)
 // ======================================
 function decodeVProtocolHeader(buffer, validUuids) {
-	if (buffer.byteLength < 24) return { hasError: true, message: 'invalid length' };
+	if (buffer.byteLength < 24) return { hasError: true, message: 'Invalid length' };
 
 	const dataView = new DataView(buffer);
 	const version = dataView.getUint8(0);
 	const slicedUuidHex = formatUuidHex(new Uint8Array(buffer.slice(1, 17)));
 
 	const isValid = validUuids.some(u => u.trim() === slicedUuidHex);
-	if (!isValid) return { hasError: true, message: 'invalid uuid auth' };
+	if (!isValid) return { hasError: true, message: 'Invalid uuid auth' };
 
 	const optLength = dataView.getUint8(17);
 	const command = dataView.getUint8(18 + optLength); // 1: TCP, 2: UDP
-	if (command !== 1 && command !== 2) return { hasError: true, message: `command ${command} is not supported, command 01-tcp,02-udp,03-mux` };
+	if (command !== 1 && command !== 2) return { hasError: true, message: `Command ${command} is not supported, command 01-tcp,02-udp,03-mux` };
 
 	const portIndex = 18 + optLength + 1;
 	const portRemote = dataView.getUint16(portIndex);
@@ -321,7 +321,7 @@ function decodeVProtocolHeader(buffer, validUuids) {
 			addrValue = Array.from({ length: 8 }, (_, i) => dataView.getUint16(addrIndex + i * 2).toString(16)).join(':');
 			break;
 		default:
-			return { hasError: true, message: `unknown addr type: ${addressType}` };
+			return { hasError: true, message: `Unknown addr type: ${addressType}` };
 	}
 
 	return {
@@ -393,7 +393,7 @@ async function connectSocks5Tunnel(addressType, addressRemote, portRemote, s5con
 async function handleDNSQuery(udpChunk, ws, vHeader, log) {
 	const dnsHost = '8.8.4.4', dnsPort = 53;
 	try {
-		log(`connected to ${dnsHost}:${dnsPort}`);
+		log(`Connected to dns server ${dnsHost}:${dnsPort}`);
 		const tcpSocket = connect({ hostname: dnsHost, port: dnsPort });
 		const writer = tcpSocket.writable.getWriter();
 		await writer.write(udpChunk);
@@ -410,10 +410,10 @@ async function handleDNSQuery(udpChunk, ws, vHeader, log) {
 				}
 			},
 			close() {
-				log(`dns server(${dnsHost}) tcp is close`);
+				log(`Dns server(${dnsHost}) tcp is closed`);
 			},
 			abort(reason) {
-				log(`dns server(${dnsHost}) tcp is abort and reason, ${reason}`);
+				log(`Dns server(${dnsHost}) tcp is abort and reason, ${reason}`);
 			}
 		}));
 	} catch (e) { log(`DNS error: ${e.message}`); }
@@ -443,7 +443,7 @@ async function fetchExternalProxies(ctx) {
 	const [textListStr, csvListStr, subProviderStr] = [
 		hasSearchParams ? [url.searchParams.get("textProxy") && "api://" + url.searchParams.get("textProxy"), ","] : [env.ADD, "\n"],
 		hasSearchParams ? [url.searchParams.get("csvProxy") && "api://" + url.searchParams.get("csvProxy"), ","] : [env.CSV, "\n"],
-		hasSearchParams ? [url.searchParams.get("subProvider") && "api://" + url.searchParams.get("subProvider"), ","] : [env.SUB, "\n"]
+		hasSearchParams ? [url.searchParams.get("subProvider"), ","] : [env.SUB, "\n"]
 	];
 
 	if (textListStr[0]) {
