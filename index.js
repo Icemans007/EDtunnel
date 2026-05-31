@@ -61,17 +61,7 @@ function buildContext(request, env) {
 	const [relayIp, relayPort] = resolveRelayIpConfig(url, RELAYIP);
 
 	// 3. SOCKS5 解析
-	let socks5Config = null;
-	const s5AddressStr = SOCKS5?.trim();
-	if (s5AddressStr) {
-		try {
-			const s5Addresses = s5AddressStr.split(/[,\s]+/);
-			const selectedS5 = s5Addresses[Math.floor(Math.random() * s5Addresses.length)];
-			socks5Config = parseSocks5Address(selectedS5);
-		} catch (e) {
-			console.error('Invalid SOCKS5 config', e);
-		}
-	}
+	const socks5Config = resolveSocks5Config(url, SOCKS5);
 
 	// 4. 其他配置与特征
 	const pathname = url.pathname.replace(/\/+$/, '') || '/';
@@ -781,6 +771,22 @@ function resolveRelayIpConfig(url, relayEnvStr) {
 	}
 	const [ip, port = '443'] = target.split(':');
 	return [ip, port];
+}
+
+function resolveSocks5Config(url, socks5EnvStr) {
+	const reqSocks5 = url.searchParams.get("socks5") || url.searchParams.get("s5");
+	const source = reqSocks5 || socks5EnvStr;
+	const pool = source?.trim().split(/[,\s]+/) || [];
+	const target = pool[Math.floor(Math.random() * pool.length)];
+
+	if (!target) return null;
+
+	try {
+		return parseSocks5Address(target);
+	} catch (e) {
+		console.error('Invalid SOCKS5 config', e);
+		return null;
+	}
 }
 
 function parseSocks5Address(addr) {
