@@ -167,9 +167,9 @@ async function handleWebSocketRouter(request, ctx) {
 			if (parsedReq.isUDP) {
 				if (parsedReq.portRemote === 53) {
 					connInfo.isDns = true;
-					return;
+				} else {
+					throw new Error('UDP proxy is only enabled for DNS (port 53)');
 				}
-				throw new Error('UDP proxy is only enabled for DNS (port 53)');
 			}
 
 			const vResponseHeader = new Uint8Array([parsedReq.protocolVersion[0], 0]);
