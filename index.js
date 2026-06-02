@@ -218,7 +218,7 @@ async function establishOutboundTCP(remoteSocketObj, parsedReq, rawData, ws, vHe
 				tcpSocket = await doConnect(addressRemote, portRemote, true);
 			} else {
 				// 否则 fallback relayIp
-				tcpSocket = await doConnect(ctx.relayIp || addressRemote, ctx.relayPort || portRemote, false);
+				tcpSocket = await doConnect(ctx.relayIp || addressRemote, ctx.relayIp && ctx.relayPort || portRemote, false);
 			}
 
 			// 增加底层 Socket 关闭事件的兜底拦截，防止假死
@@ -762,12 +762,15 @@ function buildWsReadableStream(ws, earlyDataHead, log) {
 function resolveRelayIpConfig(url, relayEnvStr) {
 	const reqIp = url.searchParams.get(base64Decode('cHJveHlpcA==')) || url.searchParams.get(base64Decode('cHlpcA=='));
 	const source = reqIp || relayEnvStr || DEFAULT_RELAY_IPS.join(',');
-	const pool = source.split(/[,\s]+/).filter(a => !a.startsWith("#"));
+	const pool = source.split(/[,\s]+/).filter(a => a && !a.startsWith("#"));
 	const target = pool[Math.floor(Math.random() * pool.length)];
+	if (!target) {
+		return null;
+	}
 
 	if (target.includes('[')) { // IPv6 parse
 		const match = target.match(/(\[[a-f0-9:]+\])(?::(\d+))?/i);
-		return match ? [match[1], match[2] || '443'] : [null, '443'];
+		return match ? [match[1], match[2] || '443'] : null;
 	}
 	const [ip, port = '443'] = target.split(':');
 	return [ip, port];
@@ -791,6 +794,7 @@ function resolveSocks5Config(url, socks5EnvStr) {
 
 function parseSocks5Address(addr) {
 	const [right, left] = addr.split("@").reverse();
+	if (!right) return null;
 	let username, password;
 	if (left) [username, password] = left.split(":");
 	const parts = right.split(":");
