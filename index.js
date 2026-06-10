@@ -108,26 +108,16 @@ async function handleHttpRouter(request, ctx) {
 	return render404Nginx();
 }
 
-async function urlForward(ctx, request) {
+function urlForward(ctx, request) {
 	const url = new URL(request.url);
 	url.host = new URL(ctx.urlForward).host;
-	const resp = await fetch(new Request(url, {
+	const newHeaders = new Headers(request.headers);
+	newHeaders.set('Host', url.host);  // 更新 Host
+	return fetch(url, {
 		method: request.method,
 		body: request.body,
 		redirect: 'manual',
-		headers: {
-			...Object.fromEntries(request.headers), // 继承原请求头
-			'host': url.host,                   // 覆盖 Host
-			'origin': url.origin,
-			'referer': url.origin    // 伪装来源
-		}
-	}));
-	const newResHeaders = new Headers(resp.headers);
-	newResHeaders.set('Access-Control-Allow-Origin', '*');
-	newResHeaders.set('Access-Control-Allow-Headers', '*');
-	return new Response(resp.body, {
-		status: resp.status,
-		headers: newResHeaders
+		headers: newHeaders
 	});
 }
 
@@ -461,7 +451,7 @@ function formatSubscriptionResponse(addresses, ctx) {
 		const pSpeed = speed_reg.exec(rawTag);
 		const eSpeed = existing && speed_reg.exec(existing[0]);
 		// 如果新链接Tag中有测速数据的Tag比没有的好，数据大的更好
-		if (!(!existing || !eSpeed && pSpeed || eSpeed && pSpeed && pSpeed[0] > eSpeed[0])) continue;
+		if (!(!existing || !eSpeed && pSpeed || eSpeed && pSpeed && +pSpeed[0] > +eSpeed[0])) continue;
 
 		let link = fullLink || (() => {
 			const urlLink = new URL(`${scheme}://${addr}`);
@@ -565,7 +555,7 @@ async function parseCsvProxyList(csvUrlStr, onlyTls, dlsStr, separator) {
 				const hasNewHeader = ((lines[i].includes('地址') || lines[i].toLowerCase().startsWith('ip'))
 					&& (lines[i].includes('端口') || lines[i].toLowerCase().includes('port')));
 				if (hasNewHeader) {
-					cols = handleHeader(lines[headerIdx]);
+					cols = handleHeader(lines[i]);
 					if (cols.ip === -1) continue;
 					header = cols.header;
 					speedUnit = cols.speedUnit;
@@ -580,7 +570,7 @@ async function parseCsvProxyList(csvUrlStr, onlyTls, dlsStr, separator) {
 					let speed = parseFloat(row[cols.speed]);
 					if (!isNaN(speed)) {
 						if (!speedUnit) speedUnit = row[cols.speed].toLowerCase().includes('kb') ? 'KB' : row[cols.speed].toLowerCase().includes('mb') ? 'MB' : '';
-						if (!speedUnit && speedUnit === 'KB') speed = Math.round(speed / 10) / 100;
+						if (speedUnit && speedUnit === 'KB') speed = Math.round(speed / 10) / 100;
 						if (speed < DLS) continue;
 					}
 				}
@@ -620,7 +610,7 @@ async function parseSubProviderLinks(subUrlStr, userID, host, separator) {
 
 			let data = await fetchWithTimeout(fetchUrl.toString(), 12000, 'v2rayn.xray');
 			if (isBase64(data)) data = base64Decode(data);
-			data = data.replace(new RegExp(fakeUserID, 'gm'), userID).replace(new RegExp(fakeHost, 'gm'), host);
+			data = data.replace(new RegExp(escapeRegExp(fakeUserID), 'gm'), userID).replace(new RegExp(escapeRegExp(fakeHost), 'gm'), host);
 			results.push(...data.split('\n').filter(Boolean));
 		} catch (e) {
 			console.error(`Sub Provider Fetch Error for ${sub}:`, e.message);
@@ -746,7 +736,7 @@ function buildWsReadableStream(ws, earlyDataHead, log) {
 		start(ctrl) {
 			ws.addEventListener('message', e => ctrl.enqueue(e.data));
 			ws.addEventListener('close', () => { safeCloseSocket(ws); ctrl.close(); });
-			ws.addEventListener('error', e => { ctrl.error(e); log('WS stream has error');});
+			ws.addEventListener('error', e => { ctrl.error(e); log('WS stream has error'); });
 
 			if (earlyDataHead) {
 				try {
@@ -862,20 +852,70 @@ function generateDomain() {
 }
 
 function base64Encode(str) {
-	return btoa(String.fromCharCode(...new TextEncoder().encode(str)));
+	const bytes = new TextEncoder().encode(str);
+	let binary = '';
+	const len = bytes.byteLength;
+
+	// 采用分块处理（每块 8192 字节），既保证了速度，又绝对不会撑爆堆栈
+	const CHUNK_SIZE = 0x2000;
+	for (let i = 0; i < len; i += CHUNK_SIZE) {
+		binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + CHUNK_SIZE, len)));
+	}
+	return btoa(binary);
 }
 
 function base64Decode(str) {
-	return new TextDecoder().decode(Uint8Array.from(atob(str), c => c.charCodeAt(0)));
+	let cleaned = str.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+	const padNeeded = (4 - (cleaned.length % 4)) % 4;
+	if (padNeeded > 0) cleaned += '='.repeat(padNeeded);
+
+	const binaryStr = atob(cleaned);
+	const len = binaryStr.length;
+	const bytes = new Uint8Array(len);
+
+	// 显式分块处理，防止大数组一次性循环或展开撑爆堆栈
+	const CHUNK_SIZE = 0x2000;
+	for (let i = 0; i < len; i += CHUNK_SIZE) {
+		const end = Math.min(i + CHUNK_SIZE, len);
+		for (let j = i; j < end; j++) {
+			bytes[j] = binaryStr.charCodeAt(j);
+		}
+	}
+	return new TextDecoder().decode(bytes);
 }
 
 function isBase64(str) {
 	if (typeof str !== 'string' || !str) return false;
-	if (!/^[A-Za-z0-9+/]+={0,2}$/.test(str)) return false;
+
+	// 1. 去除所有空白符（换行、空格、制表符等）
+	let cleaned = str.replace(/\s+/g, '');
+
+	// 2. 检查长度是否合规：
+	// Base64（包括未补齐的 URL-Safe）由于 4 字节表示 3 字节，其有效长度绝不可能是 4n + 1
+	const len = cleaned.length;
+	if (len % 4 === 1) return false;
+
+	// 3. 正则快速筛除非法字符（允许标准 +/ 和 URL-Safe _-，以及末尾的 =）
+	const base64Regex = /^[A-Za-z0-9+/_-]+={0,2}$/;
+	if (!base64Regex.test(cleaned)) return false;
+
+	// 4. 转换格式并自动补齐 Padding，为 atob 校验做准备
+	cleaned = cleaned.replace(/-/g, '+').replace(/_/g, '/');
+	const padNeeded = (4 - (len % 4)) % 4;
+	if (padNeeded > 0) {
+		cleaned += '='.repeat(padNeeded);
+	}
+
+	// 5. 利用原生的 atob 进行底层终极校验
 	try {
-		atob(str); // 尝试解码
+		atob(cleaned);
 		return true;
 	} catch {
 		return false;
 	}
+}
+
+function escapeRegExp(string) {
+  // 匹配所有正则特殊符号并加上反斜杠转义
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
 }
