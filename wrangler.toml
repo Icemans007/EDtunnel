@@ -1,6 +1,6 @@
 name = "cf-worker-ws-dev"
 main = "_worker.js"
-compatibility_date = "2026-06-01"
+compatibility_date = "2026-03-16"
 # node_compat = true
 workers_dev = true
 
