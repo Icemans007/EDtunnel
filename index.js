@@ -160,6 +160,7 @@ async function handleWebSocketRouter(request, ctx) {
 				} else {
 					throw new Error('UDP proxy is only enabled for DNS (port 53)');
 				}
+				return;
 			}
 
 			const vResponseHeader = new Uint8Array([parsedReq.protocolVersion[0], 0]);
@@ -697,7 +698,7 @@ function generateClientConfigHtml(linksStr, uuid, host, onlyTls) {
 	urlHttp.searchParams.set(base64Decode('cGF0aA=='), randomPath);
 
 	const tlsHttp = new URL(urlHttp);
-	urlHttp.hash = "HttpsNode";
+	tlsHttp.hash = "HttpsNode";
 	tlsHttp.port = "443";
 	tlsHttp.searchParams.set(base64Decode('c2VjdXJpdHk='), "tls");
 	tlsHttp.searchParams.set(base64Decode('c25p'), host);
